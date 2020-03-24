@@ -1,24 +1,15 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
-
 
 #cette fonction, spécifique à jupyter notebook permet d'importer les fonctions contenues dans un fichier séparé
-get_ipython().run_line_magic('run', '_1_Settings-SEMG.py')
-get_ipython().run_line_magic('run', 'ODIASP_functions.py')
+import _1_Settings-SEMG
+import ODIASP_functions
 
-PATH_PROJECT  = DirVerification (PATH_PROJECT)
-PATH_Images  = DirVerification (PATH_Images,PATH_PROJECT)
-PATHduMASK   = DirVerification (PATHduMASK,PATH_PROJECT)
-PATHdEXPORT  = DirVerification (PATHdEXPORT,PATH_PROJECT)
-PATH_DATASET = DirVerification (PATH_DATASET,PATH_PROJECT)
-PATH_MODELS  = DirVerification (PATH_MODELS,PATH_PROJECT)
+
 
 
 # <h1>CREATION DES FICHIERS</h1>
-
-# In[2]:
 
 
 #separation des dicom et des tags
@@ -31,10 +22,6 @@ for item in LISTE:
         shutil.move(os.path.join(DOSSIER,item), os.path.join(PATH_Images,item))
                 
 
-
-# In[6]:
-
-
 #modification des tags en .txt
 DOSSIER = r"J:\ODIASP Muscle\coupes_L3_anno"
 LISTE=os.listdir(DOSSIER)
@@ -44,16 +31,10 @@ for item in LISTE:
     nom += ".txt"
     os.rename(os.path.join(DOSSIER,item), os.path.join(DOSSIER,nom))
 
-
-# In[70]:
-
-
 #Modification des .txt pour supprimer les infos inutiles et transformer le contenu (binary) en numpy array :
 
 DOSSIER = r"J:\ODIASP Muscle\coupes_L3_anno"
 LISTE=os.listdir(DOSSIER)
-
-
 
 import struct
 
@@ -73,9 +54,6 @@ for item in LISTE:
         contenu *=255
         im2 = Image.fromarray(contenu)
         affichage2D(im2)
-
-
-# In[19]:
 
 
 #Conversion des images dicom en numpy
@@ -103,8 +81,6 @@ for item in LISTE:
     affichage2D(img_modif_dcm)
 
 
-# In[20]:
-
 
 #Modification des numpy pour les rendre lisibles par le reseau
 LISTE=os.listdir(PATH_Images)
@@ -122,8 +98,6 @@ for item in LISTE:
         np.save(SAVEPATH,volume)
 
 
-# In[120]:
-
 
 #Modification des numpy MASK pour les rendre lisibles par le reseau
 LISTE=os.listdir(PATHduMASK)
@@ -136,12 +110,6 @@ for item in LISTE:
         volume = np.asarray(volume, dtype=np.float32)
         SAVEPATH = os.path.join(r"J:\IA\ODIASP2\Dataset\Masks",item)
         np.save(SAVEPATH,volume)
-
-
-# In[26]:
-
-
-LISTE=os.listdir(PATH_Images)
 
 
 #Pour transformer directement les DICOM en png
@@ -166,10 +134,6 @@ for item in LISTE:
 
         SAVEPATH = os.path.join(r"J:\IA\ODIASP2\Dataset\Imagespng",name)
         im2.save(SAVEPATH)
-
-
-# In[31]:
-
 
 #Convertir les numpy masks en png
     
@@ -196,18 +160,18 @@ for item in LISTE:
         SAVEPATH = os.path.join(r"J:\IA\ODIASP2\Dataset\Maskspng",name)
         im2.save(SAVEPATH)
         
+        
+        
+        
+        
+        
+        
 
 
 # <h1>CREATION DU DATASET</h1>
 
-# In[38]:
-
 
 from __future__ import absolute_import, division, print_function, unicode_literals
-#import numpy as np
-#import pandas
-#import matplotlib.pyplot as plt
-#import os
 import scipy
 from scipy.ndimage import zoom, center_of_mass
 import tensorflow as tf
@@ -229,14 +193,6 @@ import pydicom as dicom
 from PIL import Image
 
 
-# In[ ]:
-
-
-
-
-
-# In[31]:
-
 
 DSMASKS= r"J:\IA\ODIASP2\Dataset\Maskspng"
 DSIMAGES= r"J:\IA\ODIASP2\Dataset\Imagespng"
@@ -245,8 +201,6 @@ BATCH_SIZE = 2
 EPOCHS = 10
 TARGETSIZE = (512,512)
 
-
-# In[60]:
 
 
 import imageio
@@ -265,7 +219,6 @@ masque = masque[np.newaxis,:,:,np.newaxis]
 image = image[np.newaxis,:,:,np.newaxis]
 
 
-# In[39]:
 
 
 data_gen_args = dict(rotation_range=30.,
@@ -285,8 +238,8 @@ mask_datagen = ImageDataGenerator(**data_gen_args)
 
 seed = 20
 
-#image_datagen.fit(image, augment=True, seed=seed)
-#mask_datagen.fit(masque, augment=True, seed=seed)
+image_datagen.fit(image, augment=True, seed=seed)
+mask_datagen.fit(masque, augment=True, seed=seed)
 
 image_generator = image_datagen.flow_from_directory(DSIMAGES,
                                                     class_mode=None,
@@ -324,7 +277,6 @@ train_generator = zip(image_generator, mask_generator)
 val_generator = zip(image_generator_val, mask_generator_val)
 
 
-# In[ ]:
 
 
 
@@ -332,7 +284,6 @@ val_generator = zip(image_generator_val, mask_generator_val)
 
 # <h1>CREATION DU RESEAU et ENTRAINEMENT</h1>
 
-# In[40]:
 
 
 #strategie multiGPU
@@ -342,11 +293,8 @@ strategy = tf.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1"],
 print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
 
 
-# In[33]:
-
-
 """
-Un essai pour avoir une loss avec des poids mais je n'ai pas réussi à l'utilisert. Voir section suivante
+Un essai pour avoir une loss avec des poids mais je n'ai pas réussi à l'utiliser. Voir section suivante
 """
 # weight: weighted tensor(same shape with mask image)
 def weighted_bce_loss(y_true, y_pred, weight):
@@ -390,11 +338,10 @@ weight = tf.constant(0.5)
 pos_weight = tf.constant(0.5)
 
 
-# In[41]:
 
 
 """
-loss avec des poids 
+loss avec des poids, celle que j'utilise
 """
 #https://stackoverflow.com/questions/60253082/weighting-samples-in-multiclass-image-segmentation-using-keras
 
@@ -413,13 +360,6 @@ def balanced_cross_entropy(beta):
     return loss
 
 
-# In[20]:
-
-
-
-
-
-# In[42]:
 
 
 def unet(
@@ -488,30 +428,11 @@ def unet(
     return model
 
 
-# In[ ]:
-
-
-"""
-Pour me souvenir de ce que j'ai enregistré comme versions
-"""
-#"ModelSEG_Muscles_V2_10epochs" : model.compile(optimizer = Adam(lr = 1e-4), loss = balanced_cross_entropy(0.7), metrics = ['accuracy'])
-# ModelSEG_Muscles_V3_40epochs :     model.compile(optimizer=SGD(lr=0.0001, decay=1e-5, momentum=0.9, nesterov=True), loss = balanced_cross_entropy(0.7), metrics = ['accuracy'])
-
-
-# In[36]:
 
 
 with strategy.scope():
     modelSegMuscles = unet(pretrained_weights = None)
 
-
-# In[36]:
-
-
-model_checkpoint = ModelCheckpoint('unet_Muscles_v2.hdf5', monitor='loss',verbose=1, save_best_only=True)
-
-
-# In[30]:
 
 
 from tensorflow.keras.callbacks import LearningRateScheduler
@@ -526,14 +447,12 @@ class LearningRateReducerCb(tf.keras.callbacks.Callback):
 callbacks=[LearningRateReducerCb()]
 
 
-# In[43]:
-
 
 hist= modelSegMuscles.fit(train_generator,
                 steps_per_epoch=647//BATCH_SIZE,
                 epochs=EPOCHS,
                 validation_data=val_generator,
-                #callbacks=[model_checkpoint], #callbacks, #,
+                #callbacks=callbacks,
                 validation_steps=71//BATCH_SIZE
                                )
 

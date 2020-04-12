@@ -13,6 +13,8 @@ import scipy
 from scipy.ndimage import zoom, center_of_mass
 import matplotlib.pyplot as plt
 import numpy as np
+import cupy as cp
+from cupyx.scipy import ndimage as MAGIC
 import pydicom
 from pydicom.dataset import Dataset, FileDataset
 from pydicom.uid import ExplicitVRLittleEndian
@@ -29,6 +31,9 @@ from alive_progress import alive_bar
 import datetime
 import scipy
 import openpyxl
+import time
+
+
 
 import tensorflow as tf
 from tensorflow import keras
@@ -77,6 +82,9 @@ fichiers=['AUTORUN.INF','CDVIEWER.EXE','INDEX.HTM','LOG4J.XML','DICOMDIR','RUN.C
 dossiers=['JRE','HELP','IHE_PDI','PLUGINS','XTR_CONT']
 
 def massacre(path, doss = dossiers, fich = fichiers):
+    """
+    Non nécessaire
+    """
     for i in doss:
         try:
             shutil.rmtree(os.path.join(path,i),ignore_errors=True)
@@ -282,7 +290,7 @@ def randomize(a, b):
 def rotation_augmentation(a, b, rotation_max=20, shuffle=True, axis =0, verbose=1):
     """
     prend les volumes a et b et crée deux volumes de mêmes dimensions avec des coupes présentant une rotation
-    rotation max définit la rotation possible
+    rotation max définit l'angle max de rotation possible
     rq : on peut l'utiliser plusieurs fois avec des reglages différents pour ajouter +100% de coupes à chaque fois
     """
     coupes = np.shape(a)[axis]
@@ -350,11 +358,18 @@ def DeleteCSVRow(name, csv_path, PATH_PROJECT= r"C:\\Users\\alexa\\OneDrive\\Doc
     
 def sag_to_axial (volume_array, sens=1):
     """
-    Utilisée dans Reading_and_scale
+    DEPRECATED
     rotation pour passer le volume de axial à sagittal
     """
-    volume_array = np.rot90(volume_array,k=sens,axes=(0,2))
-    volume_array = np.rot90(volume_array,k=sens,axes=(1,0))
+    #volume_array = np.rot90(volume_array,k=sens,axes=(0,2))
+    #volume_array = np.rot90(volume_array,k=sens,axes=(1,0))
+    
+    #CUPY
+    volume_array_gpu = cp.asarray(volume_array)
+    volume_array_gpu = cp.rot90(volume_array,k=sens,axes=(0,2))
+    volume_array_gpu = cp.rot90(volume_array,k=sens,axes=(1,0))
+    volume_array = cp.asnumpy(volume_array_gpu)
+    
     return volume_array
 
 def Reading_and_scale (name, 
@@ -553,7 +568,7 @@ def import_dicom_to_abdopelv(rootdir,
         titres += "Name"
         for ele in metadata:
             titres += ","+ str(ele)
-        titres += ",OriginalSlices,DeletedSlices,Facteur,Path,Segmented,Scaled,L3Position,Certitude,L3Original,Traitement"
+        titres += ",OriginalSlices,DeletedSlices,Facteur,Path,L3Position,Certitude,L3Original"
         if verbose>0:print("Creation du csv")
         with open(csv_path,"wt", encoding="utf-8") as file :
             file.write(titres)
@@ -566,7 +581,7 @@ def import_dicom_to_abdopelv(rootdir,
     facteur = 1
     erreur = " "
     inter = {}
-    
+    start = time.perf_counter()
     
     
     list_files = os.listdir(rootdir)
@@ -581,7 +596,7 @@ def import_dicom_to_abdopelv(rootdir,
         
         
         if not os.path.isdir(echantillon1):
-            _ds_1 = pydicom.dcmread(echantillon1,force =True, specific_tags =["ImagePositionPatient","SliceThickness","WindowCenter","BodyPartExamined", "FilterType", "SeriesDescription","SeriesInstanceUID"])
+            _ds_1 = pydicom.dcmread(echantillon1,force =True, specific_tags =["ImagePositionPatient","SliceThickness","WindowCenter","BodyPartExamined", "FilterType", "SeriesDescription","SeriesInstanceUID","PatientAge"])
             
             
             """
@@ -628,6 +643,11 @@ def import_dicom_to_abdopelv(rootdir,
                 if "HEAD" in str(BodyPartExamined) : #Limitation si imagerie cerebrale
                     erreur += " BodyPartExamined : "+str(BodyPartExamined)
                     stopNow = True
+            if (0x10, 0x10) in _ds_1:
+                Age = _ds_1["PatientAge"].value
+                if Age[:-1] < 18 : #Limitation si patient mineur
+                    erreur += " Patient mineur : "+str(Age)
+                    stopNow = True
             if (0x18, 0x1160) in _ds_1:
                 BodyPartExamined = _ds_1["FilterType"].value
                 if "HEAD" in str(BodyPartExamined) : #Limitation si imagerie cerebrale (autre moyen de verification)
@@ -661,7 +681,12 @@ def import_dicom_to_abdopelv(rootdir,
         if verbose>0:print("   Arrêt précoce de niveau 1. Les images n'ont pas été chargées : ",erreur)
         perduSUP = "Arret"
         facteur = "niveau1"
+        
         return volume_numpy, perduSUP, perduBAS, facteur, None #le volume numpy est donc vide si le dossier n'avait pas les informations requises.
+        
+        
+        
+        
         
     if stopNow == False:
         """
@@ -687,7 +712,7 @@ def import_dicom_to_abdopelv(rootdir,
         if verbose>0:print("Creation d'un volume echantillon pour labelisation")
         x_dimDIV=x_dim/4
         y_dimDIV=y_dim/4
-        ratioECHANTILLONAGE = 3 #Nous allons tester le volume à cet intervalle de coupe
+        ratioECHANTILLONAGE = 5 #Nous allons tester le volume à cet intervalle de coupe
         hauteur = len(liste_fichiers)//ratioECHANTILLONAGE 
         volume_pour_label=np.zeros((hauteur,int(x_dimDIV),int(y_dimDIV),3))
         for k in range (0,hauteur):
@@ -706,18 +731,22 @@ def import_dicom_to_abdopelv(rootdir,
             if (0x28, 0x1051) in dicom_file:
                 WindowWidth = dicom_file["WindowWidth"].value
             
+            
             arraytopng = zoom(img_modif_dcm, (1/4, 1/4))
             arraytopng = np.stack((arraytopng,)*3, axis=-1)
             volume_pour_label[k,:,:,:]=arraytopng
+            
             del arraytopng
+            
+        volume_pour_label     = np.asarray(volume_pour_label, dtype=np.float16) #DEBUG float32    
         volume_pour_label,a,b = normalize(volume_pour_label)
         volume_pour_label     = WL_scaled(WindowCenter,WindowWidth,volume_pour_label,a,b)
             
         if verbose>1:affichage3D(volume_pour_label, 64, axis=2)
 
-        if verbose>0:print("Analyse du volume pour obtention d'un scanner abdominopelvien")
+        if verbose >0 : print("Analyse du volume pour obtention d'un scanner abdominopelvien")
         if verbose >0 : AA=1 #Permet de mettre corriger le verbose si celui_ci était de 2.
-        else : AA=0
+        else :          AA=0
         AUTO_BATCH = int(Compute_capacity*5.3)
         prediction = model.predict(volume_pour_label, verbose =AA, batch_size=AUTO_BATCH)
         prediction0_1 = np.zeros_like(prediction, dtype=None, order='K', subok=True, shape=None)
@@ -745,12 +774,19 @@ def import_dicom_to_abdopelv(rootdir,
         perduSUP = "Arret"
         facteur = "niveau2"
         
-        
         if verbose>1:print("Mise à jour du fichier csv :", csv_path)
-        with open(csv_path,"a", encoding="utf-8") as file :
+        """with open(csv_path,"a", encoding="utf-8") as file :
                 file.write("\n")
                 file.write(str(NOMFICHIER))
-                file.close() 
+                file.close() """
+        
+        end = time.perf_counter()
+        Timing = end-start
+        
+        dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing, "Erreur" : facteur}
+        df=pandas.read_csv(csv_path, delimiter=",")
+        modDfObj = df.append(dictODIASP, ignore_index=True)
+        modDfObj.to_csv(csv_path, index=False)
         
         return volume_numpy, perduSUP, perduBAS, facteur, None
     
@@ -796,7 +832,11 @@ def import_dicom_to_abdopelv(rootdir,
        
         
         del volume_pour_label
-
+        
+        
+        
+        
+        
         
         #Creation du volume representant le scanner dont on garde les coupes
         volume_numpy=np.zeros((len(liste_fichiers),x_dim,y_dim))
@@ -806,15 +846,25 @@ def import_dicom_to_abdopelv(rootdir,
             dicom_file = pydicom.read_file(liste_fichiers[k])
             img_orig_dcm = (dicom_file.pixel_array)
             img_modif_dcm=(img_orig_dcm*slope) + intercept
+            img_modif_dcm= np.asarray(img_modif_dcm, dtype=np.float16) #DEBUG float32
             volume_numpy[k,:,:]=img_modif_dcm #ecrit une ligne correspondant à l'image
-        volume_numpy = np.asarray(volume_numpy, dtype=np.float32)
+        volume_numpy = np.asarray(volume_numpy, dtype=np.float16) #DEBUG float32
         
         if len(liste_fichiers)>384 : #Cette partie de la fonction permet de s'affranchir des inégalités dépaisseurs de coupes.
             facteur = 384/(len(liste_fichiers))
         nbcoupesfinal = int(len(liste_fichiers)*facteur)
         if facteur !=1 :
             if verbose>0:print(len(liste_fichiers)," coupes ont été chargées puis le volume est ramené à ", nbcoupesfinal, " coupes")
-            volume_numpy = zoom(volume_numpy, (facteur, 1, 1))
+            
+            #volume_numpy = zoom(volume_numpy, (facteur, 1, 1)) 
+            #CUPY
+            cp.cuda.Device(0).use()
+            x_gpu_0 = cp.asarray(volume_numpy)
+            x_gpu_0 = MAGIC.zoom(x_gpu_0, (facteur, 1, 1))
+            volume_numpy = cp.asnumpy(x_gpu_0)
+            x_gpu_0 = None
+            
+            
         else : 
             if verbose>0: print(len(liste_fichiers), " coupes ont étés chargées")
     
@@ -827,6 +877,7 @@ def import_dicom_to_abdopelv(rootdir,
         #Affichage
         if verbose>1: 
             print("...dont voici l'image sagittale centrale")
+            volume_numpy = np.asarray(volume_numpy, dtype=np.float16)
             affichage3D(volume_numpy, int(x_dim//2), axis=2)    
         
         
@@ -834,10 +885,8 @@ def import_dicom_to_abdopelv(rootdir,
             
         #Mise a jour du csv
         if verbose>1:print("Mise à jour du fichier csv :", csv_path)
-
-        values=NOMFICHIER
+        values=[]
         for de2 in metadata:
-            values = values + "," 
             if de2 in ds_img1:
                 if ds_img1[de2].VR == "SQ":
                     values = values + "sequence"
@@ -847,15 +896,19 @@ def import_dicom_to_abdopelv(rootdir,
                     raw_ds = raw_ds.replace('\r','__')
                     raw_ds = raw_ds.replace('\t',"__")
                     raw_ds = raw_ds.replace(',',"__")
-                    values = values + raw_ds
-        values += ","+str(nbcoupes)
-        values += ","+str(perduSUP)+r"+"+str(perduBAS)
-        values += ","+str(facteur)
-        values += ","+str(rootdir)
-        with open(csv_path,"a", encoding="utf-8") as file :
-                file.write("\n")
-                file.write(values)
-                file.close() 
+                    values.append(raw_ds)
+
+        end = time.perf_counter()
+        Timing = end-start
+                    
+        dictMETADATAS = dict(zip(metadata, values))
+        dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing,'OriginalSlices' : nbcoupes, 'DeletedSlices' : str(perduSUP)+r"+"+str(perduBAS),'Facteur' : facteur , 'Path' : rootdir, "Archive" : None}
+        dict3 = {**dictMETADATAS , **dictODIASP}
+
+        df=pandas.read_csv(csv_path, delimiter=",")
+        modDfObj = df.append(dict3, ignore_index=True)
+
+        modDfObj.to_csv(csv_path, index=False)
        
     return volume_numpy, perduSUP, perduBAS, facteur, NOMFICHIER
 
@@ -1022,6 +1075,7 @@ def normalize (volume_array):
     return volume_array_scale,a,b
 
 
+
 def axial_to_sag (volume_array, sens=1):
     """
     Utilisée dans FindL3
@@ -1058,7 +1112,7 @@ def affichage3D(volume, k, axis=0):
     if axis == 2:
         image1 = volume[:,:,k]
     plt.imshow(image1,cmap='gray')
-    plt.show(block=True)
+    plt.show()
     return
     
 def affichage2D(volume):
@@ -1073,7 +1127,7 @@ def affichage2D(volume):
     f = plt.figure()
     image1 = volume
     plt.imshow(image1,cmap='gray')
-    plt.show(block=True)
+    plt.show()
     return
 
 def AffichageMulti(volume, frequence, axis=0, FIGSIZE = 40):
@@ -1225,40 +1279,50 @@ def NPY_to_DICOM (numpy=None,
 #___________________________________________________________________________________________
 
 
-def newNorm_and_Scale(VOLUME,downsample = 0.5):
-    """
-    prend un volume intact et commence à le traiter
-    """
-    VOLUME = axial_to_sag(VOLUME)
-    hauteur = np.shape(VOLUME)[1]
-    correction =("ok",1,0)
-    if hauteur<384:
-        ratio =384/hauteur
-        VOLUME = zoom(VOLUME, (1, ratio, 1))
-        correction = ("trop petit",hauteur, ratio)
-    if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
-        VOLUME = VOLUME[:,-384:,:]
-        delta = hauteur-384.
-        correction = ("trop grand", hauteur, delta)
-    VOLUME,a,b = normalize(VOLUME)
-    if downsample != 1 :
-        VOLUME = zoom(VOLUME, (1, downsample, 1))
-    return VOLUME, correction,a,b
 
-
-def Crop_ram_management(volume, downsample = 0.5):
-    """
-    Il s'agit d'une fonction utilisée pour diminuer la taille des fichiers
-    """
-    volume   = volume[128:384,:,96:-32] #[96:416,:,96:-32] >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    volume   = zoom(volume, (1, 1, downsample))
-    return volume
 
 
 def Norm_and_Scale_andCrop(VOLUME,downsample = 0.5):
     """
     prend un volume intact et commence à le traiter
+    permet de diminuer la taille des fichiers
     """
+    cp.cuda.Device(0).use()
+
+    
+    VOLUME = axial_to_sag(VOLUME)
+    #volume_array_gpu = cp.asarray(VOLUME)
+    #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(0,1))
+    #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(2,0))
+    
+    hauteur = np.shape(VOLUME)[1]
+    correction =("ok",1,0)
+    if hauteur<384:
+        ratio =384/hauteur
+        volume_array_gpu = cp.asarray(VOLUME)
+        volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, ratio, 1))
+        VOLUME = cp.asnumpy(volume_array_gpu)
+        volume_array_gpu = None
+        correction = ("trop petit",hauteur, ratio)
+    if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
+        VOLUME = VOLUME[:,-384:,:]
+        delta = hauteur-384.
+        correction = ("trop grand", hauteur, delta)
+        
+    
+    
+    VOLUME   = VOLUME[170:342,:,96:-32]
+    if downsample != 1 :
+        volume_array_gpu = cp.asarray(VOLUME)
+        volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, downsample, downsample))
+        VOLUME = cp.asnumpy(volume_array_gpu)
+        volume_array_gpu = None
+        
+    
+    VOLUME,a,b = normalize(VOLUME)
+    
+    """
+    #Version CPU
     VOLUME = axial_to_sag(VOLUME)
     hauteur = np.shape(VOLUME)[1]
     correction =("ok",1,0)
@@ -1276,6 +1340,7 @@ def Norm_and_Scale_andCrop(VOLUME,downsample = 0.5):
     VOLUME   = VOLUME[170:342,:,96:-32]
     if downsample != 1 :
         VOLUME = zoom(VOLUME, (1, downsample, downsample))
+    """
     return VOLUME, correction,a,b
 
 
@@ -1332,6 +1397,8 @@ def Find_L3 (name,
         - con : plus lent que de segmenter par la suite avec ODIASP.PredictMUSCLES
     
     """
+    start = time.perf_counter()
+    
     #Verification que le dossier de sortie existe
     if savepng != False :
         savepng  = DirVerification (savepng, DossierProjet=dirgeneral,verbose = 0)
@@ -1364,7 +1431,6 @@ def Find_L3 (name,
     
     #calcul du centre de gravité du volume donné au réseau pour obtenir le centre de L3 (et correction de sa valeur pour correspondre au volume numpy donné en entrée
     center = scipy.ndimage.center_of_mass(prediction, labels=None, index=None)
-    print(center) #DEBUG
     upsample=1/downsample
     position = center[1]*upsample #position = center[1]*upsample
     if correction[0]=="trop petit": #lit la correction
@@ -1380,6 +1446,7 @@ def Find_L3 (name,
     Certitude = (Standard_deviation*100)**6
     if verbose>0:print("Estimation de la confiance : ", Certitude)
     
+    NUMPY = np.asarray(NUMPY, dtype=np.float16)
     image = NUMPY[position,:,:] #image axiale centrée sur le baricentre
     image_wl=ApplyWindowLevel(level,window,image) #réglages de contraste
     sagittal = NUMPY[:,:,int(center[0])+170] #image sag centrée sur le baricentre  #sagittal = NUMPY[:,:,int(center[0])+128] #image sag centrée sur le baricentre 
@@ -1388,6 +1455,7 @@ def Find_L3 (name,
 
     sagittalPRED = prediction[int(center[0]),:,:]
     sagittalPRED = sagittalPRED[:,:,0]
+
     if correction[2] == 0:factueurdecorrection=1
     else : factueurdecorrection=correction[2]
     sagittalPRED = zoom(sagittalPRED, (1/(factueurdecorrection*downsample),1/downsample))
@@ -1433,13 +1501,16 @@ def Find_L3 (name,
         plt.show()
         
     if csv_path != False: #mettre a jour le csv avec pandas
+        end = time.perf_counter()
+        Timing = end-start
+        
         df=pandas.read_csv(csv_path, delimiter=",")
         df.set_index("Name", inplace=True)
         df.at[nameNPY,"L3Position"] = position
         df.at[nameNPY,"Standard_deviation"] = Standard_deviation
         df.at[nameNPY,"Certitude"] = Certitude
         df.at[nameNPY,"L3Original"] = positionreelle
-        
+        df.at[nameNPY,"DureeL3"] = Timing
         df.to_csv(csv_path)
 
     return image, image_wl, positionreelle
@@ -1500,14 +1571,19 @@ def All_in_One(dossierDICOM,
         """
         Import du scanner, labelisation avec le premier reseau et mise a jour du csv
         """
+        start_time = time.clock() #TIME
+
+
         volume_numpy, perduSUP, perduBAS, facteur, NOM = import_dicom_to_abdopelv(dirs,
                                                                                   metadata = METADATAS,
                                                                                   csv_path = csv_path,
                                                                                   save= False, 
                                                                                   model = MODEL_niveau_de_coupe,
                                                                                   verbose = VERBOSE)
-
-
+        
+        finImport_time = time.clock() #TIME
+        print(finImport_time - start_time, "secondes pour l'import ")#TIME
+        
         if perduSUP == "Arret" : #export_dicomDir_to_numpyV2 renvoit la variable perdu = "Arret" si jamais elle s'est arrêtée seule
             if facteur == "niveau1" :
                 nb_niv1 +=1
@@ -1515,7 +1591,7 @@ def All_in_One(dossierDICOM,
                 nb_niv2 +=1
             if VERBOSE >1 : print ("\n")
 
-
+        
 
         else :
             """
@@ -1533,7 +1609,11 @@ def All_in_One(dossierDICOM,
                                                  nombredecoupesperduesSUP = perduSUP,nombredecoupesperduesBAS = perduBAS,
                                                  facteurAgrandissement = facteur,
                                                  verbose = VERBOSE)
-
+            
+            
+            finL3 = time.clock() #TIME
+            print(finL3 - finImport_time, "secondes pour la segmentation L3 ")#TIME
+            
             """
             On recupere la postion de L3 pour aller chercher le fichier dicom d'origine qui lui correspond
             """
@@ -1591,7 +1671,8 @@ def All_in_One(dossierDICOM,
                 mask[mask >= -29] = 1
                 mask[mask < -29] = 0
                 SEGMuscles_masked = copy(SEGMuscles[0,:,:,0])
-                SEGMuscles_masked[SEGMuscles_masked < 0.7] = 0
+                SEGMuscles_masked[SEGMuscles_masked <= 0.5] = 0
+                SEGMuscles_masked[SEGMuscles_masked > 0.5] = 1
                 SEGMuscles_masked = np.multiply(SEGMuscles_masked,mask)
                 surface_0 = np.sum(SEGMuscles_masked)
 
@@ -1620,6 +1701,10 @@ def All_in_One(dossierDICOM,
                     df.at[NOM,"Surface"] = float("{0:.2f}".format(surface_0*(pixelspacing**2)/100))
                     df.to_csv(csv_path)
                     if VERBOSE >1 : print(df.loc[NOM])
+                        
+                finFonction= time.clock() #TIME
+                print(finFonction - finL3, "secondes pour le reste ")#TIME
+                print(finFonction - start_time, "secondes pour la totalité")#TIME
 
             if VERBOSE >0 :print("\n")
 
@@ -1746,6 +1831,8 @@ def PredictMUSCLES(DossierImport,
     volume_wl=np.zeros((len(fichiersdcm),512,512))
     liste_pixelspace = []
     liste_surfacecm2 = []
+    liste_surfaceGraissecm2 = []
+    
     for k in range (0,len(fichiersdcm)):
         f_long = os.path.join(DossierImport, fichiersdcm[k])
 
@@ -1760,7 +1847,7 @@ def PredictMUSCLES(DossierImport,
         volume[k,:,:]=img_modif_dcm 
         
         #enregistre le pixelspacing
-        pixelspacing=float(str(dicom_file[0x28,0x0030].value)[1:7])
+        pixelspacing=float(str(dicom_file[0x28,0x0030].value)[1:6])
         liste_pixelspace.append(pixelspacing)
     
     
@@ -1776,6 +1863,12 @@ def PredictMUSCLES(DossierImport,
     mask[mask < -29] = 0 
     mask = mask[:,:,:,np.newaxis]  
     
+    #Obtention dela surface graisseuse grace aux pixels entre -190 et -29UH (cf litterature)
+    graisse = copy(volume) 
+    graisse[graisse >   -29] = -1000
+    graisse[graisse >= -190] = 1
+    graisse[graisse <  -190] = 0 
+    
     #On le fait passer dans le reseau de neurones
     if VERBOSE >0 :a=1
     else: a=0
@@ -1785,7 +1878,8 @@ def PredictMUSCLES(DossierImport,
     del volume_to_predict
     del volume
     
-    SEGMuscles[SEGMuscles < 0.7] = 0   #reglage du threshold
+    SEGMuscles[SEGMuscles <= 0.5] = 0   #reglage du threshold
+    SEGMuscles[SEGMuscles > 0.5] = 1
     SEGMuscles_masked = np.multiply(SEGMuscles,mask)
     
     for image in range (0,len(fichiersdcm)):
@@ -1793,6 +1887,11 @@ def PredictMUSCLES(DossierImport,
         pixelspace = liste_pixelspace[image]
         surfacecm2 = sommepixels*(pixelspace**2)/100
         liste_surfacecm2.append(surfacecm2)
+        
+        sommeGraisse = np.sum(graisse[image,:,:])
+        surfaceGraisse = sommeGraisse*(pixelspace**2)/100
+        liste_surfaceGraissecm2.append(surfaceGraisse)
+    
     
     
     if DIR_SORTIE != False :
@@ -1805,6 +1904,13 @@ def PredictMUSCLES(DossierImport,
             im_mask = Image.fromarray(image_du_masque)
             im_mask.save(SAVEPATHmask)
     
+            nameGraisse = str(fichiersdcm[image])[:-19] + "_Graisse.png"
+            SAVEPATHgraisse = os.path.join(DIR_SORTIE,nameGraisse)
+            image_de_la_graisse = graisse[image,:,:]
+            image_de_la_graisse *=255
+            image_de_la_graisse= image_de_la_graisse.astype(np.uint8)
+            im_graisse = Image.fromarray(image_de_la_graisse)
+            im_graisse.save(SAVEPATHgraisse)
     
     if csv_path != False: #mettre a jour le csv avec pandas
         df=pandas.read_csv(csv_path, delimiter=",")
@@ -1812,6 +1918,7 @@ def PredictMUSCLES(DossierImport,
         for k in range (0,len(fichiersdcm)) :
             Nom_en_numpy = str(fichiersdcm[k])[:-28] + r".npy"
             df.at[Nom_en_numpy,"Surface"] = float("{0:.2f}".format(liste_surfacecm2[k]))
+            df.at[Nom_en_numpy,"SurfaceGraisseuse"] = float("{0:.2f}".format(liste_surfaceGraissecm2[k]))
         df.to_csv(csv_path)
     
     return fichiersdcm, liste_pixelspace, liste_surfacecm2    
@@ -1899,7 +2006,7 @@ def import_all_XLS(dossier):
     return result, listeExcels
 
 
-def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurautorisee = 0.25, verbose=1, showresults = True):
+def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurautorisee = 0.25, verbose=1):
     pandas.set_option('mode.chained_assignment', None)
     
     #Chargement du csv (ODIASP)
@@ -1907,21 +2014,19 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurau
         df = readCSV(csvpathtemp) 
         
         #Effacement des résultats dans le csvTemporaire pour ne garder que la liste des examens déjà lus (evite qu'ils soient chargés à nouveau)
-        #colonnes_save = ["Name","PatientID","StudyDate","StudyID","PatientName","SeriesInstanceUID","StudyDescription","PatientSex","PatientAge","SliceThickness","Rows","Columns","PixelSpacing","WindowCenter","WindowWidth","OriginalSlices","DeletedSlices","Facteur","Path"] 
-        dfsave = df.copy()
-        #dfsave.is_copy = None
-        dfsave['Surface'] = np.nan
-        dfsave.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
-        dfsave.to_csv(csvpathtemp)
+        dfsave = readCSV(csvpathtemp) 
+        dfsave["Archive"] = "Yes"
+        #dfsave.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
+        dfsave.to_csv(csvpathtemp, index=False)
         
         
-        #Effacer les lignes vides
-        df = df.dropna(axis=0,subset=['Surface'])
+        #Effacer les lignes déjà analysées
+        nonfait = df["Archive"].isna()
+        df = df[nonfait]
 
         #Recuperation des colonnes utiles uniquement  
-        features_cols = ["PatientID", "StudyDate", "StudyID", "PatientName","Surface" ,"Certitude","PatientSex"]
+        features_cols = ["PatientID", "StudyDate", "StudyID", "PatientName","Surface" ,"Certitude","PatientSex","SurfaceGraisseuse"]
         df = df[features_cols]
-        
         
         #Pour corriger les types
         for colonne in ["PatientID", "StudyDate", "StudyID"]:
@@ -1929,30 +2034,37 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurau
             df[colonne] = df[colonne].astype('int') 
         df["PatientName"] = df["PatientName"].astype('str') 
         df["Surface"] = df["Surface"].astype('float') 
+        df["SurfaceGraisseuse"] = df["SurfaceGraisseuse"].astype('float') 
         df["Certitude"] = df["Certitude"].astype('float') 
 
+        #Calcul de la graisse
+        #df['MGratioODIASP'] = df.apply(lambda row: row['Surface'] / (row['SurfaceGraisseuse']), axis=1)
+        
+        
         nombreODIASP = df.shape[0]
     
     #Chargment des .xls (automatica)
     dfauto, listeExcels = import_all_XLS(dossier)
     if len(listeExcels)>0 :
+        print(len(listeExcels)) #DEBUG
         nombreAUTOMATICA = dfauto.shape[0]
     
     #Fusion des dataframes
     if os.path.isfile(csvpathtemp)==True and len(listeExcels)>0  and nombreODIASP >0:
+        print("actif")
         #fusion des resultats
         df4 = pandas.concat([df,dfauto], ignore_index=False)
         df4 = df4.groupby(by=["PatientID","StudyDate"],observed=False).agg('mean')
 
         #Affichage des incertitudes sur ces resultats
-        df4['Erreur'] = np.where((df4['Certitude']<1), 'Incertitude sur L3', 'ok') #<<<<<<<<<<<<<<<<<<<<<<< tweaker la valeur seuil
-        df4.loc[df4['MGratio'] >2, 'Erreur'] = 'Incertitude sur les muscles' 
-        df4.loc[df4['Muscle CSA'] < ((1-erreurautorisee)*df4['Surface']), 'Erreur'] = 'Incertitude sur les muscles' 
-        df4.loc[df4['Muscle CSA'] > ((1+erreurautorisee)*df4['Surface']), 'Erreur'] = 'Incertitude sur les muscles' 
+        df4['Erreurs'] = np.where((df4['Certitude']<1), 'Incertitude sur L3', 'ok') #<<<<<<<<<<<<<<<<<<<<<<< tweaker la valeur seuil
+        df4.loc[df4['MGratio'] >2, 'Erreurs'] = 'Incertitude sur les muscles' 
+        df4.loc[df4['Muscle CSA'] < ((1-erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude sur les muscles' 
+        df4.loc[df4['Muscle CSA'] > ((1+erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude sur les muscles' 
         
         #On recupere les noms qui ont été perdus par la fonction groupby
         dfnames = df.copy()
-        dfnames = dfnames[["PatientID","PatientSex", "StudyDate", "PatientName"]]
+        dfnames = dfnames[["PatientID","PatientSex", "StudyDate", "PatientName","PatientSize"]]
         #dfnames.is_copy = None
         dfnames.drop_duplicates(keep="first",inplace=True) 
         dfnames.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
@@ -1972,17 +2084,16 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurau
                 else:
                     print ("Creation du dossier %s " % path)
 
-                for f in listeExcels:
-                    move(os.path.join(dossier,f), path)
+            for f in listeExcels:
+                move(os.path.join(dossier,f), path)
             
-
-        if showresults == True :
-            print(nombreODIASP+nombreAUTOMATICA,"segmentations réalisées, ramenées à", newresult.shape[0], "patients uniques,")
-            print("dont",newresult.Erreur.value_counts()['ok'], "mesures semblent correctes")
+        if verbose>0: print(nombreODIASP+nombreAUTOMATICA,"segmentations réalisées, ramenées à", newresult.shape[0], "patients uniques,")
+        if verbose>0: print("dont",newresult.Erreurs.value_counts()['ok'], "mesures semblent correctes")
     
     
         #Ecriture du csv
         if os.path.isfile(resultatspath)==True:
+            
             ancienresult = pandas.read_csv(resultatspath, delimiter=",")
             ancienresult.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
             if showresults == True: print("Ajoutées aux", ancienresult.shape[0], "mesures pré-existantes.")

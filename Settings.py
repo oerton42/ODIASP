@@ -44,11 +44,12 @@ METADATA = ["PatientName",
             "Columns",
             "PixelSpacing",
             "WindowCenter",
-            "WindowWidth"
+            "WindowWidth",
+            "PatientSize"
            ]
 
 #Reglage de l'affichage
-verbose = 2
+verbose = 1
 # 0 = pas d'affichage, 
 # 1 = texte uniquement, 
 # 2 = images et texte (mais bloque le script tant que l'image n'est pas fermé si executé dans la console)
@@ -56,7 +57,7 @@ verbose = 2
 
 
 #Chosir si on veut segmenter les muscles à la volée ou non :
-SEGM_MUSCLES = True
+SEGM_MUSCLES = False
 
 
 

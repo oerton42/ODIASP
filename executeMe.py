@@ -48,9 +48,9 @@ start_time = time.perf_counter() #TIME
 
 
 #Chargement des différents réseaux
-modelLABEL, modelL3, modelMUSCLE                 = ODIASP.load_modelsODIASP(PATH_MODELS_ODIASP, 
-                                                                            #strategy=strategy, 
-                                                                            muscle = SEGM_MUSCLES)
+modelLABEL, modelL3, modelMUSCLE, _                 = ODIASP.load_modelsODIASP(PATH_MODELS_ODIASP,
+                                                                               muscle = SEGM_MUSCLES,
+                                                                               verification = False)
 
 
 ODIASP.All_in_One(dossierDICOM          = DossierImportDICOM,
@@ -69,6 +69,8 @@ ODIASP.All_in_One(dossierDICOM          = DossierImportDICOM,
 finsegm = time.perf_counter() #TIME
 print(finsegm - start_time, "secondes pour la totalité des scanners")#TIME
 
+del modelLABEL
+del modelL3
 
 """
     2_ SEGMENTER LES MUSCLES

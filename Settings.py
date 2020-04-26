@@ -9,15 +9,48 @@ Ceci correspond au fichier de réglages
 """
 
 
+
+
+#_____________________________________________
+#      REGLAGES NECESSAIRES
+#_____________________________________________
+
 #Indiquer le dossier où trouver les DICOM
-DossierImportDICOM   = r"J:\ExportODIASP1" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+DossierImportDICOM   = r"J:\Covid" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
 
-#Indiquer le dossier général qui servira de dossier de travail (prévoir plusieurs gigas de libre !)
+#Indiquer le dossier général qui servira de dossier de travail
 DossierDuProjet = r"C:\Users\alexa\IA\ODIASP" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
-#et ces sous-dossiers ...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#_____________________________________________
+#      REGLAGES OPTIONNELS
+#_____________________________________________
+
+
+
+#Le nom des sous-dossiers ...
 PATHdEXPORT             = "DicomFromODIASP" #Dossier intermédiaire pour enregistrer les fichiers DICOM correspondant aux coupes L3.
 PATHduMASK              = "SegmentationMuscles" #Dossier pour sauvegarde des résultats
 PATH_MODELS_ODIASP      = "models_ODIASP" #Mettre ici les models d'ODIASP

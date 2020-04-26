@@ -73,190 +73,12 @@ def DirVerification (name,DossierProjet=None,verbose = 1):
         return dir_path
 
 
-
-#___________________________________________________________________________________________
-#___________________FONCTIONS POUR NETTOYER UN DOSSIER D'EXPORT DU PACS_____________________
-#___________________________________________________________________________________________
-
-fichiers=['AUTORUN.INF','CDVIEWER.EXE','INDEX.HTM','LOG4J.XML','DICOMDIR','RUN.CMD','RUN.COMMAND','RUN.SH','README.TXT']
-dossiers=['JRE','HELP','IHE_PDI','PLUGINS','XTR_CONT']
-
-def massacre(path, doss = dossiers, fich = fichiers):
-    """
-    Non nécessaire
-    """
-    for i in doss:
-        try:
-            shutil.rmtree(os.path.join(path,i),ignore_errors=True)
-        except:
-            pass
-    for j in fich:
-        try:
-            os.remove(os.path.join(path,j))
-        except: 
-            pass
-        
         
 #___________________________________________________________________________________________
 #___________________FONCTIONS POUR LA CREATION DES DATASETS ________________________________
 #___________________________________________________________________________________________
 
-        
-def export_dicomDir_to_png(rootdir,
-                             metadata,
-                           resultat,#correspond à la liste des Metadata que l'on veut récupérer dans les DICOM 
-                             csv_path, #chemin du CSV
-                             savePATH #indiquer le path pour les images
-                            ):
-    """
-
-    """
-    stopNow = False
-
-    #creation du dataframe pour le csv
-    if os.path.isfile(csv_path)==True:
-        df=pandas.read_csv(csv_path, delimiter=",")
-    else : 
-        column_names = list()
-        column_names.append("Name")
-        for ele in metadata:
-            column_names.append(str(ele))
-        column_names.extend(resultat)
-        df = pandas.DataFrame(columns=column_names)
-    df.set_index("Name", inplace=True)
-    
-    
-    inter = {}
-    list_files = os.listdir(rootdir)
-    if len(list_files) <150:
-        print("   Not enough slices")
-        stopNow = True
-
-    if stopNow == False:
-        echantillon1 = os.path.join(rootdir, list_files[1])
-        echantillon2 = os.path.join(rootdir, list_files[100])
-        if not os.path.isdir(echantillon1):
-            _ds_1 = pydicom.dcmread(echantillon1,force =True, specific_tags =["ImagePositionPatient","SliceThickness","WindowCenter","BodyPartExamined", "FilterType", "SeriesDescription"])
-            if (0x18, 0x50) in _ds_1:
-                thickness = _ds_1["SliceThickness"].value
-                if thickness >2.5: #Limitation si coupe trop épaisses : MIP...etc
-                    print("   Thickness is too high.")
-                    stopNow = True
-
-        if not os.path.isdir(echantillon2):
-            _ds_2 = pydicom.dcmread(echantillon2,force =True,specific_tags =["ImagePositionPatient","SliceThickness"])
-        position1 = [5.,10.,15.] 
-        position2 = [5.,10.,15.] #Lecture de la position pour ne pas prendre de MPR coro ou sag
-        if (0x20, 0x32) in _ds_1:
-            position1 = _ds_1["ImagePositionPatient"].value
-        if (0x20, 0x32) in _ds_2:
-            position2 = _ds_2["ImagePositionPatient"].value
-        if position1[0] != position2[0]:
-            print("   Sagittal plane.")
-            stopNow = True
-        if position1[1] != position2[1]:
-            print("   Coronal plane.")
-            stopNow = True
-        
-    if stopNow == True:
-        return df #le volume numpy est donc vide si le dossier n'avait pas les informations requises.
-        
-    if stopNow == False:
-        #Maintenant que l'on a arrêté la fonction précocement selon certains criteres, regardons la liste des images
-        for f in list_files:
-            if not os.path.isdir(f):
-                f_long = os.path.join(rootdir, f)
-                _ds_ = pydicom.dcmread(f_long,specific_tags =["ImagePositionPatient","SliceThickness"])
-                inter[f_long]=_ds_.ImagePositionPatient[2]
-        inter_sorted=sorted(inter.items(), key=lambda x: x[1], reverse=True) #il faut les trier dans l'ordre de la sequece de scanner (ce qui n'est pas l'ordre alphabetique du nom des fichiers)
-        liste_fichiers=[x[0] for x in inter_sorted]
-        
-        nbcoupes = len(liste_fichiers)
-        print(nbcoupes, " fichiers trouvés pour ce scanner")
        
-        j=0
-        randomnumber = random.randint(0, 1000)
-        for k in range (0,len(liste_fichiers)):
-            dicom_file = pydicom.read_file(liste_fichiers[k])
-            img_orig_dcm = (dicom_file.pixel_array)
-
-            slope=float(dicom_file[0x28,0x1053].value)
-            intercept=float(dicom_file[0x28,0x1052].value)
-            img_modif_dcm=(img_orig_dcm*slope) + intercept
-
-            if (0x28, 0x1050) in dicom_file:
-                WindowCenter = dicom_file["WindowCenter"].value
-                if not isinstance(WindowCenter, float) :
-                    WindowCenter = 40
-            if (0x28, 0x1051) in dicom_file:
-                WindowWidth = dicom_file["WindowWidth"].value
-            SAVING = os.path.basename(rootdir)+r"_{}_{}.png".format(randomnumber, j) 
-            arraytopng=ApplyWindowLevel(WindowCenter,WindowWidth,img_modif_dcm) #réglages de contraste
-            arraytopng = zoom(arraytopng, (1/4, 1/4))
-            im = Image.fromarray(arraytopng)
-            im.save(os.path.join(savePATH, SAVING))
-                    
-            j+=1
-            #Mise a jour du dataframe pour le csv
-            values = list()
-            for de2 in metadata:
-                if de2 in dicom_file:
-                    if dicom_file[de2].VR == "SQ":
-                        values.append("sequence")
-                    elif dicom_file[de2].name != "Pixel Data":
-                        _ds = str(dicom_file[de2].value)[:64]
-                        raw_ds = _ds.replace('\n','__')
-                        raw_ds = raw_ds.replace('\r','__')
-                        raw_ds = raw_ds.replace('\t',"__")
-                        raw_ds = raw_ds.replace(',',"__")
-                        values.append(raw_ds)
-            values.append(rootdir)
-            values.extend([0]*(len(resultat)-1))
-            df.loc[str(SAVING)] = values
-        df.to_csv(csv_path)
-    return df
-
-
-def to_segment(pathCSV,number=1,shuffle=False,Colonne="Segmented"):
-    """
-    Cette fonction permet de trouver des examens dans le fichier cvs qui ne sont pas encore segmentés
-    par défaut elle montre le nom d'un examen mais on peut demander autant d'examen que voulus (elle se limitera seule si on demande plus d'examens que disponibles réellement)
-    shuffle permet de les obtenir au hasard
-    reamrque, en rentrant zero elle permet d'exporter une liste d'examens et le dataset entier. 
-    """
-    df=pandas.read_csv(pathCSV, delimiter=",")
-    if number > df.shape[0]:
-        number=df.shape[0]
-    Segmented = []
-    NotSegmented = []
-    for i in range(0,df.shape[0]):
-        if pandas.isna(df[Colonne][i]) == True:
-            NotSegmented.append(df["Name"][i])
-        elif pandas.isna(df[Colonne][i]) != True:
-            Segmented.append(df["Name"][i])
-    print("There is "+str(len(NotSegmented))+" scans to segment among "+ (str(len(Segmented)+len(NotSegmented))))
-    doing=0
-    j=0
-    if len(NotSegmented) == 0:
-        number = 0
-    while doing<number:
-        if shuffle == True:
-            i=np.random.choice(range(0,df.shape[0]),1)[0]
-            while pandas.isna(df[Colonne][i]) == False:
-                i=np.random.choice(range(0,df.shape[0]),1)[0]
-            else:
-                print(df.iloc[i])
-                i=np.random.choice(range(0,df.shape[0]),1)[0]
-                doing +=1
-        else:
-            if pandas.isna(df[Colonne][i]) == True:
-                print(df.iloc[i])
-                j+=1
-                doing +=1
-            else:
-                j+=1
-    return df, Segmented, NotSegmented
-
 def readCSV(csv_path,name=None,indexing=None):
     """
     Fonction simple pour lire le CSV et le garder en mémoire sous la forme d'un datafile, plus facilement lisible en utilisant pandas
@@ -270,183 +92,6 @@ def readCSV(csv_path,name=None,indexing=None):
         print(df.loc[name])
     return df
 
-
-#___________________________________________________________________________________________
-#___________________FONCTIONS POUR GESTION DU DATASET_______________________________________
-#___________________________________________________________________________________________
-    
-    
-def randomize(a, b):
-    """
-    Permet de randomiser l'ordre des coupes avant de diviser en train/test/val
-    Il faut rentrer les images et les masks pour que leur randomisation soit la même
-    """
-    permutation = np.random.permutation(a.shape[0])
-    shuffled_a = a[permutation]
-    shuffled_b = b[permutation]
-    return shuffled_a, shuffled_b
-     
-
-def rotation_augmentation(a, b, rotation_max=20, shuffle=True, axis =0, verbose=1):
-    """
-    prend les volumes a et b et crée deux volumes de mêmes dimensions avec des coupes présentant une rotation
-    rotation max définit l'angle max de rotation possible
-    rq : on peut l'utiliser plusieurs fois avec des reglages différents pour ajouter +100% de coupes à chaque fois
-    """
-    coupes = np.shape(a)[axis]
-    a_rotated=np.zeros(np.shape(a))
-    b_rotated=np.zeros(np.shape(b))
-    min_a,min_b=np.float(a.min()),np.float(b.min())
-    for coupe in range(coupes):
-        if shuffle==True :
-            #creer une valeur au hasard entre -rotation_max et +rotation_max
-            rotation_max = abs(rotation_max)
-            rotation = np.random.choice(range(-rotation_max,rotation_max),1)[0]
-        else :
-            rotation = rotation_max
-        if axis == 0:
-            a_rot = scipy.ndimage.rotate(a[coupe,...], angle=rotation, axes=(0,1), reshape=False, output=None, order=3, mode='constant', cval=min_a, prefilter=True)
-            b_rot = scipy.ndimage.rotate(b[coupe,...], angle=rotation, axes=(0,1), reshape=False, output=None, order=3, mode='constant', cval=min_b, prefilter=True)
-            a_rotated[coupe,:,:] = a_rot
-            b_rotated[coupe,:,:] = b_rot
-        if axis == 1:
-            a_rot = scipy.ndimage.rotate(a[:,coupe,...], angle=rotation, axes=(0,1), reshape=False, output=None, order=3, mode='constant', cval=min_a, prefilter=True)
-            b_rot = scipy.ndimage.rotate(b[:,coupe,...], angle=rotation, axes=(0,1), reshape=False, output=None, order=3, mode='constant', cval=min_b, prefilter=True)
-            a_rotated[:,coupe,...] = a_rot
-            b_rotated[:,coupe,...] = b_rot
-        if verbose == 1:
-            print(coupe,"/",coupes)
-    return a_rotated, b_rotated
-    
-
-
-def DeleteCSVRow(name, csv_path, PATH_PROJECT= r"C:\\Users\\alexa\\OneDrive\\Documents\\ODIASP", raiseErrors=True):
-    """
-    a nourrir du nom d'un des numpy (string) ou une liste de strings
-    Efface dans le csv, dans le dossiers Images et dans le dossier Masks.
-    Pour éviter d'effacer une segmentation, par défaut la fonction s'arrête s'il existe un Mask. Il faut modifier raiseErrors pour lever cette sécurité.
-    """
-    if type(name)==list:
-        print(type(name))
-        for item in name:
-            DeleteCSVRow(name = item, csv_path=csv_path, PATH_PROJECT=PATH_PROJECT, raiseErrors=raiseErrors)
-    else :
-        if os.path.exists(os.path.join((os.path.join(PATH_PROJECT,"Masks")),name)) and raiseErrors==True:
-            raise Exception('{} exists as a mask too.'.format(name))
-        df=pandas.read_csv(csv_path, delimiter=",")
-        df.set_index("Name", inplace=True)
-        try :
-            df=df.drop(index=[name])
-            df.to_csv(csv_path)
-            print("CSV modified")
-        except KeyError as error:
-            print(error)
-        try:
-            os.remove(os.path.join(os.path.join(PATH_PROJECT,"Masks"),name))
-            print("Mask deleted")
-        except FileNotFoundError as error:
-            print(error)
-        try:
-            os.remove(os.path.join(os.path.join(PATH_PROJECT,"Images"),name))
-            print("Image deleted")
-        except FileNotFoundError as error:
-            print(error)
-        print("Say goodbye to "+name)
-        return df
-
-    
-    
-def sag_to_axial (volume_array, sens=1):
-    """
-    DEPRECATED
-    rotation pour passer le volume de axial à sagittal
-    """
-    #volume_array = np.rot90(volume_array,k=sens,axes=(0,2))
-    #volume_array = np.rot90(volume_array,k=sens,axes=(1,0))
-    
-    #CUPY
-    volume_array_gpu = cp.asarray(volume_array)
-    volume_array_gpu = cp.rot90(volume_array,k=sens,axes=(0,2))
-    volume_array_gpu = cp.rot90(volume_array,k=sens,axes=(1,0))
-    volume_array = cp.asnumpy(volume_array_gpu)
-    
-    return volume_array
-
-def Reading_and_scale (name, 
-                       NUMPY = "from_hardrive", MASK = "from_hardrive",  #par défaut les volumes NUMPY et MASK sont chargés à partir des dossiers, sinon on peut les fournir en format numpy array.
-                       scale = True, #utilise la fonction de scaling, définie par ailleurs
-                       downsample = False, #diminue la taille du volume pour gagner en mémoire, rentrer le coefficient comme valeur
-                       save = False, #enregistre les resultats 
-                       show = False, #affiche des résultats en images
-                       csv_path = False, #mettre a jour le csv avec panda
-                       mask_path = r"C:\Users\alexa\OneDrive\Documents\ODIASP\Masks",
-                       export_path = r"C:\Users\alexa\OneDrive\Documents\ODIASP\Scaled"
-                      ):
-    """
-    Lorsque le mask est fait cette fonction permet de :
-    - lire les différents volumes, 
-    - vérifier leur concordance
-    - modifier leur taille, 
-    - mettre à jour le csv 
-    - sauvegarder 
-    - afficher les résultats pour vérifier que l'enregistrement est bon.
-    """
-    if NUMPY == "from_hardrive" :
-        NUMPY = Reading_Hardrive (name, Class="Images")
-    else :
-        NUMPY = NUMPY
-    if MASK == "from_hardrive" :    
-        MASK = Reading_Hardrive (name, Class="Masks")
-    else :
-        MASK = MASK
-    PATHduMASK = os.path.join(mask_path,name)
-    PATHdEXPORT = os.path.join(export_path,name)
-    
-    #inversion du volume du mask, qui a été créé par 3D slicer qui a la mauvaise habitude rendre des volume numpy à l'envers...
-    MASK = np.flip(MASK,0)
-    MASK = np.flip(MASK,1)
-    MASK = np.flip(MASK,2)
-    
-    if NUMPY.shape!=MASK.shape :
-        raise ValueError("Not the same shape")
-    print("Initial shape of "+name+":" + str(NUMPY.shape))
-    
-    #traitement des volumes, cette partie serait à changer en cas de nouveau projet
-    MASK = axial_to_sag(MASK) 
-    NUMPY = axial_to_sag(NUMPY)
-    if scale == True:
-        MASK,_ = Scaling(MASK)
-        NUMPY,_,_ = normalize(NUMPY)
-        NUMPY,_ = Scaling(NUMPY)
-    if downsample != False:
-        MASK = zoom(MASK, (1, downsample, downsample))
-        NUMPY = zoom(NUMPY, (1, downsample, downsample))
-        
-    if save == True:
-        np.save(PATHduMASK, MASK)
-        np.save(PATHdEXPORT, NUMPY) #Il s'agit du dossier où seront sauvegardés les volumes des scanners à donner au réseau de neurone
-    print("New shape  of "+name+":" + str(NUMPY.shape))
-    
-    #mettre a jour le csv avec pandas
-    if csv_path != False: 
-        df=pandas.read_csv(csv_path, delimiter=",")
-        df.set_index("Name", inplace=True)
-        df.at[name,"Segmented"] = 1
-        if scale == True:
-            df.at[name,"Scaled"] = 1
-        df.to_csv(csv_path)
-        
-    #affichage des résultats pour vérifier    
-    if show == True:
-        for k in range (0,(NUMPY.shape)[0],12):
-            f = plt.figure()
-            image = NUMPY[k,:,:]
-            mask = MASK[k,:,:]
-            plt.imshow(image,cmap='gray')
-            plt.imshow(mask, cmap='magma', alpha=0.7)
-            plt.show(block=True)
-            
-    return NUMPY, MASK
     
 #___________________________________________________________________________________________
 #___________________FONCTIONS POUR IMPORTER LES FICHIERS DICOM______________________________
@@ -456,10 +101,18 @@ def Reading_and_scale (name,
 
 def fast_scandir(dir):
     """
-    Pour scanner les sous-dossiers
-    Nourrir d'un dossier contenant plusieurs sous dossiers
-    sort une liste des PATH pour tous les sous dossiers présents
+    Prend un dossier contenant atant de sous-dossiers et sous-sous-dossiers que voulu et en crée la liste des sous dossiers.
+    Utile pour généraliser une fonction adaptée à un dossier à autant de dossiers que voulus en une seule fois.
     Rq : le dossier dir n'est pas inclus dans la liste
+    
+    Parameters
+    ----------
+        - dir : string, chemin vers le dossier racine
+        
+    Returns
+    -------
+        - subfloders : liste, contient tous les sous-dossiers
+    
     """
     subfolders= [f.path for f in os.scandir(dir) if f.is_dir()]
     for dir in list(subfolders):
@@ -574,34 +227,48 @@ def import_dicom_to_abdopelv(rootdir,
             file.write(titres)
             file.close()
  
-
+    #Création des variables dont nous allons avoir besoin :
     stopNow = False
     perduSUP = 0
     perduBAS = 0
     facteur = 1
     erreur = " "
+    volume_numpy = np.empty(0)
     inter = {}
     start = time.perf_counter()
     
     
     list_files = os.listdir(rootdir)
     if len(list_files) <150:
-        erreur = " Pas assez de coupes"
-        stopNow = True
+        erreur = " Pas assez de coupes ({} fichiers)".format(len(list_files))
+        perduSUP = "Arret"
+        facteur = "niveau1"
+        if verbose>0:print("   Arrêt précoce de niveau 1. Les images n'ont pas été chargées : ",erreur)
+        return volume_numpy, perduSUP, perduBAS, facteur, None #le volume numpy est donc vide si le dossier n'avait pas les informations requises.
 
-    if stopNow == False:
+    else :
+        test1 = 1
+        test2 = 100
         
-        echantillon1 = os.path.join(rootdir, list_files[1])
-        echantillon2 = os.path.join(rootdir, list_files[100])
+        echantillon1 = os.path.join(rootdir, list_files[test1])
+        echantillon2 = os.path.join(rootdir, list_files[test2])
         
+        while os.path.isdir(echantillon1):
+            test1 +=1
+            echantillon1 = os.path.join(rootdir, list_files[test1])
         
+        while os.path.isdir(echantillon1):
+            test2 +=1
+            echantillon2 = os.path.join(rootdir, list_files[test2])
+                     
         if not os.path.isdir(echantillon1):
-            _ds_1 = pydicom.dcmread(echantillon1,force =True, specific_tags =["ImagePositionPatient","SliceThickness","WindowCenter","BodyPartExamined", "FilterType", "SeriesDescription","SeriesInstanceUID","PatientAge"])
+            _ds_1 = pydicom.dcmread(echantillon1,force =True)
             
             
             """
-            Verifions que cette serie n'a pas deja ete analysee
+            Donnons un nom à cette série
             """
+            
             if (0x20, 0x000E) in _ds_1:
                 NameSerie = str(_ds_1["SeriesInstanceUID"].value)
                 NameSerie = NameSerie.replace('.','')
@@ -610,21 +277,35 @@ def import_dicom_to_abdopelv(rootdir,
                 NameSerie = "000000000000000000000000000000"
             
             NOMFICHIER = str(os.path.basename(rootdir))+"_"+NameSerie+r".npy"
+            
+            """
+            Verifions que cette serie n'a pas deja ete analysee en quel cas on s'arrête.
+            """
             if os.path.isfile(csv_path)==True:
                 df = readCSV(csv_path,name=None,indexing="Name")
                 if df.index.str.contains(NameSerie).any() :
-                    erreur = " Scanner déjà analysé."
-                    stopNow = True
+                    erreur = " Scanner déjà analysé."                  
+                    if verbose>0:print("   Arrêt précoce de niveau 1. Les images n'ont pas été chargées : ",erreur)
+                    perduSUP = "Arret"
+                    facteur = "niveau1"
+                    return volume_numpy, perduSUP, perduBAS, facteur, None
                     
             """
             Nous essayons de déterminer s'il s'agit d'un scanner AP ou TAP à partir uniquement des métadonnées du dicom
-            Cela permet si ce n'est pas le cas de réaliser une fonction rapide, qui ne charge aucune image.
+            Cela permet si ce n'est pas le cas de réaliser une fonction rapide, qui ne charge quasiment aucune image.
             """        
+            if (0x08, 0x60) in _ds_1:
+                modalite = _ds_1["Modality"].value
+                if str(modalite) != "CT": #Limitation si ce n'est pas un scanner !
+                    erreur += " Le fichier DICOM n'est pas un scanner."
+                    stopNow = True
+            
             if (0x18, 0x50) in _ds_1:
                 thickness = _ds_1["SliceThickness"].value
                 if thickness >2.5: #Limitation si coupe trop épaisses : MIP...etc
                     erreur += " Epaisseur de coupe trop importante."
                     stopNow = True
+                    
             if (0x28, 0x1050) in _ds_1:
                 WindowCenter = _ds_1["WindowCenter"].value
                 try :
@@ -637,27 +318,41 @@ def import_dicom_to_abdopelv(rootdir,
                 if WindowCenter ==500:
                     erreur += " Fenetrage Os." #Limitation si fenetre os (car trop de grain)
                     stopNow = True
-                
+                    
             if (0x18, 0x15) in _ds_1:
                 BodyPartExamined = _ds_1["BodyPartExamined"].value
                 if "HEAD" in str(BodyPartExamined) : #Limitation si imagerie cerebrale
                     erreur += " BodyPartExamined : "+str(BodyPartExamined)
                     stopNow = True
+            
+            #Verification de l'âge
             if (0x10, 0x10) in _ds_1:
                 Age = _ds_1["PatientAge"].value
-                if Age[:-1] < 18 : #Limitation si patient mineur
+                if Age[-1:] != "Y" :
                     erreur += " Patient mineur : "+str(Age)
                     stopNow = True
+                else : 
+                    try : 
+                        Age = Age[:-1]
+                        if float(Age) < 18. : #Limitation si patient mineur
+                            erreur += " Patient mineur : "+str(Age)
+                            stopNow = True
+                    except TypeError:
+                        print("Erreur dans la lecture de l'âge chez ce patient :", Age, type(Age))
+                        pass
+                
             if (0x18, 0x1160) in _ds_1:
                 BodyPartExamined = _ds_1["FilterType"].value
                 if "HEAD" in str(BodyPartExamined) : #Limitation si imagerie cerebrale (autre moyen de verification)
                     erreur += " FilterType : " + str(BodyPartExamined)
                     stopNow = True
+                    
             if (0x8, 0x103E) in _ds_1:
                 BodyPartExamined = _ds_1["SeriesDescription"].value
                 if "Crane" in str(BodyPartExamined) : #Limitation si imagerie cerebrale (autre moyen de verification)
                     erreur += " Scanner Cranien."
                     stopNow = True
+                    
         if not os.path.isdir(echantillon2):
             _ds_2 = pydicom.dcmread(echantillon2,force =True,specific_tags =["ImagePositionPatient","SliceThickness"])
         position1 = [5.,10.,15.] 
@@ -677,10 +372,38 @@ def import_dicom_to_abdopelv(rootdir,
         """
         Si le scanner n'est ni AP ni TAP la fonction s'arrête dès maintenant.
         """
-        volume_numpy = np.empty(0)
+        
         if verbose>0:print("   Arrêt précoce de niveau 1. Les images n'ont pas été chargées : ",erreur)
         perduSUP = "Arret"
         facteur = "niveau1"
+        
+        
+        if verbose>1:print("Mise à jour du fichier csv :", csv_path)
+        #Essai remplir csv meme pour les arrets
+        values=[]
+        for de2 in metadata:
+            if de2 in _ds_1:
+                if _ds_1[de2].VR == "SQ":
+                    values = values + "sequence"
+                elif _ds_1[de2].name != "Pixel Data":
+                    _ds = str(_ds_1[de2].value)[:64]
+                    raw_ds = _ds.replace('\n','__')
+                    raw_ds = raw_ds.replace('\r','__')
+                    raw_ds = raw_ds.replace('\t',"__")
+                    raw_ds = raw_ds.replace(',',"__")
+                    values.append(raw_ds)
+            
+            
+        end = time.perf_counter()
+        Timing = end-start
+        
+        dictMETADATAS = dict(zip(metadata, values))
+        
+        dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing, "Erreur" : erreur,'OriginalSlices' : len(list_files), 'Path' : rootdir, "Archive" : None}
+        dict3 = {**dictMETADATAS , **dictODIASP}
+        df=pandas.read_csv(csv_path, delimiter=",")
+        modDfObj = df.append(dict3, ignore_index=True)
+        modDfObj.to_csv(csv_path, index=False)
         
         return volume_numpy, perduSUP, perduBAS, facteur, None #le volume numpy est donc vide si le dossier n'avait pas les informations requises.
         
@@ -775,20 +498,37 @@ def import_dicom_to_abdopelv(rootdir,
         facteur = "niveau2"
         
         if verbose>1:print("Mise à jour du fichier csv :", csv_path)
-        """with open(csv_path,"a", encoding="utf-8") as file :
-                file.write("\n")
-                file.write(str(NOMFICHIER))
-                file.close() """
         
+        #Essai remplir csv meme pour les arrets
+        values=[]
+        for de2 in metadata:
+            if de2 in ds_img1:
+                if ds_img1[de2].VR == "SQ":
+                    values = values + "sequence"
+                elif ds_img1[de2].name != "Pixel Data":
+                    _ds = str(ds_img1[de2].value)[:64]
+                    raw_ds = _ds.replace('\n','__')
+                    raw_ds = raw_ds.replace('\r','__')
+                    raw_ds = raw_ds.replace('\t',"__")
+                    raw_ds = raw_ds.replace(',',"__")
+                    values.append(raw_ds)
+            
+            
         end = time.perf_counter()
         Timing = end-start
         
-        dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing, "Erreur" : facteur}
+        dictMETADATAS = dict(zip(metadata, values))
+        
+        dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing, "Erreur" : erreur,'OriginalSlices' : len(list_files), 'Path' : rootdir, "Archive" : None}
+        dict3 = {**dictMETADATAS , **dictODIASP}
         df=pandas.read_csv(csv_path, delimiter=",")
-        modDfObj = df.append(dictODIASP, ignore_index=True)
+        modDfObj = df.append(dict3, ignore_index=True)
         modDfObj.to_csv(csv_path, index=False)
         
         return volume_numpy, perduSUP, perduBAS, facteur, None
+    
+    
+
     
     
     
@@ -940,8 +680,8 @@ def ApplyWindowLevel (Global_Level,Global_Window,image):
     Ne fonctionne PAS si l'image a déjà été normalisée. Dans ce cas utiliser WL_scaled en fournissant a et b (obtenu par la fonction normalize).
     
     """
-    li=Global_Level-(Global_Window/2);
-    ls=Global_Level+(Global_Window/2);
+    li=Global_Level-(Global_Window/2)
+    ls=Global_Level+(Global_Window/2)
     image_ret=np.clip(image, li, ls)
     image_ret=image_ret-li
     image_ret=image_ret/(ls-li)
@@ -1582,14 +1322,14 @@ def All_in_One(dossierDICOM,
                                                                                   verbose = VERBOSE)
         
         finImport_time = time.clock() #TIME
-        print(finImport_time - start_time, "secondes pour l'import ")#TIME
+        print(finImport_time - start_time, "secondes pour l'import")#TIME
         
         if perduSUP == "Arret" : #export_dicomDir_to_numpyV2 renvoit la variable perdu = "Arret" si jamais elle s'est arrêtée seule
             if facteur == "niveau1" :
                 nb_niv1 +=1
             if facteur == "niveau2" :
                 nb_niv2 +=1
-            if VERBOSE >1 : print ("\n")
+            if VERBOSE >1 : print ("\n \n")
 
         
 
@@ -1712,7 +1452,7 @@ def All_in_One(dossierDICOM,
     return
 
 
-def load_modelsODIASP(model_directory, strategy=None, label = True, L3 = True, muscle=True):
+def load_modelsODIASP(model_directory, strategy=None, label = True, L3 = True, muscle=True, verification = True):
     
     """
     Loads previously trained models from a single provided directory folder 
@@ -1737,6 +1477,7 @@ def load_modelsODIASP(model_directory, strategy=None, label = True, L3 = True, m
     modelLABEL = None
     modelL3 = None
     modelMUSCLE = None
+    modelVerif = None
     
     def dice_coef(y_true, y_pred):
         '''
@@ -1775,6 +1516,8 @@ def load_modelsODIASP(model_directory, strategy=None, label = True, L3 = True, m
             if muscle== True :
                 modelMUSCLE = tf.keras.models.load_model(os.path.join(model_directory, "modelMUSCLE"), compile=False) #get_unet_512_V4_30ep
                 modelMUSCLE.compile(optimizer=RMSprop(lr=0.0001), loss=bce_dice_loss, metrics=[dice_coef])
+            if verification == True :
+                modelVerif  = tf.keras.models.load_model(os.path.join(model_directory, "modelVerification")) 
     
     else : 
         if label == True : 
@@ -1784,14 +1527,17 @@ def load_modelsODIASP(model_directory, strategy=None, label = True, L3 = True, m
         if muscle== True :
             modelMUSCLE = tf.keras.models.load_model(os.path.join(model_directory, "modelMUSCLE"), compile=False) #get_unet_512_V4_30ep
             modelMUSCLE.compile(optimizer=RMSprop(lr=0.0001), loss=bce_dice_loss, metrics=[dice_coef])
+        if verification == True :
+                modelVerif  = tf.keras.models.load_model(os.path.join(model_directory, "modelVerification")) 
     
-    return modelLABEL, modelL3, modelMUSCLE
+    return modelLABEL, modelL3, modelMUSCLE, modelVerif
 
     
     
 def PredictMUSCLES(DossierImport,
                    csv_path,
                    Model_segmentation_muscles,
+                   Model_Verification,
                    DIR_SORTIE = False,
                    VERBOSE = 2,
                    WINDOW_CENTER = 40, WINDOW_WIDTH = 400,
@@ -1822,9 +1568,12 @@ def PredictMUSCLES(DossierImport,
     """
     touslesfichiers = os.listdir(DossierImport)
     fichiersdcm = []
+    #fichiersPNG = []
     for item in touslesfichiers :
         if str(item)[-19:] == r"_FichierOrigine.dcm":
             fichiersdcm.append(item)
+        #elif str(item)[-19:] == r"_FichierOrigine.png":
+            #fichiersPNG.append(item)   
     del touslesfichiers
     
     volume=np.zeros((len(fichiersdcm),512,512))
@@ -1847,7 +1596,8 @@ def PredictMUSCLES(DossierImport,
         volume[k,:,:]=img_modif_dcm 
         
         #enregistre le pixelspacing
-        pixelspacing=float(str(dicom_file[0x28,0x0030].value)[1:6])
+        pixelspacing=str(dicom_file[0x28,0x0030].value)
+        pixelspacing = float(pixelspacing.split(",")[0][1:])
         liste_pixelspace.append(pixelspacing)
     
     
@@ -1878,9 +1628,14 @@ def PredictMUSCLES(DossierImport,
     del volume_to_predict
     del volume
     
-    SEGMuscles[SEGMuscles <= 0.5] = 0   #reglage du threshold
-    SEGMuscles[SEGMuscles > 0.5] = 1
+    #reglage du threshold, abandonné, cf article
+    #SEGMuscles[SEGMuscles <= 0.5] = 0   
+    #SEGMuscles[SEGMuscles > 0.5] = 1
+    
     SEGMuscles_masked = np.multiply(SEGMuscles,mask)
+    
+    #Calcul de la densité du muscle
+    
     
     for image in range (0,len(fichiersdcm)):
         sommepixels = np.sum(SEGMuscles_masked[image,:,:,0])
@@ -1892,8 +1647,24 @@ def PredictMUSCLES(DossierImport,
         surfaceGraisse = sommeGraisse*(pixelspace**2)/100
         liste_surfaceGraissecm2.append(surfaceGraisse)
     
+    #Creation de la carte affichant toutes les segmentations :
+    resultat = np.ones_like(graisse)
+    resultat -= graisse
+    resultat -= SEGMuscles_masked[:,:,:,0]
     
+    volume_wl = (volume_wl)* resultat
+    volume_wl = np.stack((volume_wl,)*3, axis=-1)
+    volume_wl[:,:,:,2]=graisse*255.
+    volume_wl[:,:,:,0]=SEGMuscles_masked[:,:,:,0]*255.
     
+    Verification_volume = volume_wl/255
+    Verification_volume = zoom(Verification_volume, (1, .5, .5,1))
+    if VERBOSE >0 : print("Vérification des résultats par le réseau de neurones dédié :")
+    Predictions = Model_Verification.predict(Verification_volume, verbose=a)
+    labels = ["erreurL3", "erreurMuscles", "Ok"]
+    predictions = [labels[k] for k in np.argmax(Predictions,axis=1)]
+    
+    #Sauvegarde
     if DIR_SORTIE != False :
         for image in range (0,len(fichiersdcm)):
             namemask = str(fichiersdcm[image])[:-19] + "_Mask.png"
@@ -1911,6 +1682,13 @@ def PredictMUSCLES(DossierImport,
             image_de_la_graisse= image_de_la_graisse.astype(np.uint8)
             im_graisse = Image.fromarray(image_de_la_graisse)
             im_graisse.save(SAVEPATHgraisse)
+            
+            nameAffichage = str(fichiersdcm[image])[:-19] + "_Verification({}).png".format(predictions[image])
+            SAVEPATHaffichage = os.path.join(DIR_SORTIE,nameAffichage)
+            image_overlay = volume_wl[image,:,:,:]
+            image_overlay= image_overlay.astype(np.uint8)
+            im_overlay = Image.fromarray(image_overlay)
+            im_overlay.save(SAVEPATHaffichage)
     
     if csv_path != False: #mettre a jour le csv avec pandas
         df=pandas.read_csv(csv_path, delimiter=",")
@@ -1919,6 +1697,7 @@ def PredictMUSCLES(DossierImport,
             Nom_en_numpy = str(fichiersdcm[k])[:-28] + r".npy"
             df.at[Nom_en_numpy,"Surface"] = float("{0:.2f}".format(liste_surfacecm2[k]))
             df.at[Nom_en_numpy,"SurfaceGraisseuse"] = float("{0:.2f}".format(liste_surfaceGraissecm2[k]))
+            df.at[Nom_en_numpy,"PredictionVerification"] = predictions[k]
         df.to_csv(csv_path)
     
     return fichiersdcm, liste_pixelspace, liste_surfacecm2    
@@ -1971,7 +1750,7 @@ def import_one_XLS(fichierexcel,dossier):
     dfauto = pandas.DataFrame(data, columns=columns)
 
     #Recuperation des colonnes utiles uniquement  
-    features_cols_auto = ["Patient ID", "Age", "Sex", "Muscle CSA", "IMAT CSA", "VAT CSA", "SAT CSA", "CT date"]
+    features_cols_auto = ["Patient ID", "Age", "Sex", "Muscle CSA", "IMAT CSA", "VAT CSA", "SAT CSA", "CT date","Muscle HU","Scan folder","Instance_UID"]
     dfauto = dfauto[features_cols_auto]
 
     #Changement des noms et types
@@ -1980,7 +1759,7 @@ def import_one_XLS(fichierexcel,dossier):
     dfauto["StudyDate"] = dfauto["StudyDate"].astype('int')
     
     #Calcul du Muscle Graisse ratio
-    dfauto['MGratio'] = dfauto.apply(lambda row: row['Muscle CSA'] / (row['IMAT CSA']+row['VAT CSA']+row['SAT CSA']), axis=1)
+    #dfauto['MGratio'] = dfauto.apply(lambda row: row['Muscle CSA'] / (row['IMAT CSA']+row['VAT CSA']+row['SAT CSA']), axis=1)
 
     return dfauto
 
@@ -1989,7 +1768,7 @@ def import_all_XLS(dossier):
     listetotal = os.listdir(dossier)
     listeExcels = []
     for item in listetotal :
-        if str(item)[-5:] == r".xlsx":
+        if str(item)[-5:] == r".xlsx" and str(item)[:8] ==r"Results ":
             listeExcels.append(item)
     
     if len(listeExcels)>0 :
@@ -2006,27 +1785,88 @@ def import_all_XLS(dossier):
     return result, listeExcels
 
 
-def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurautorisee = 0.25, verbose=1):
+def RecuperationErreurs(dataframe, dossierExport, pathdexport, verbose = 1):
+    """
+    Suppression des lignes dans le xls dont ne veut pas après vérification du réseau de neurone
+    
+    Parameters
+    ----------
+        - dataframe : le dataframe provenant d'AutoMATiCA
+        - dossierExport : chemin vers le dossier où sont enregistrés les résultats finaux
+        - pathedexport, correspond à PATHdEXPORT, le dossier des resultats intermediaires
+        
+    Returns
+    -------
+    le dataframe avec les informations justes et le dataframe avec les informations fausses
+    
+    """
+    #Creation d'une liste des examens erronnés d'apres le reseau de verification
+    LISTEVERIF = os.listdir(dossierExport)
+    ErreursL3 = []
+    ErreursMuscles = []
+    nbinitial = len(dataframe)
+    for item in LISTEVERIF :
+        if "erreurL3" in item :
+            name = item[:-27]
+            name=os.path.join(pathdexport,str(name)+r"_FichierOrigine.dcm")
+            ErreursL3.append(name)
+        elif "erreurMuscles" in item :
+            name = item[:-32]
+            name=os.path.join(pathdexport,str(name)+r"_FichierOrigine.dcm")
+            ErreursMuscles.append(name)
+    
+    for erreur in ErreursL3 : 
+        dataframe.loc[dataframe["Scan folder"]==erreur, 'PredictionVerification'] = "erreurL3"
+    for erreur in ErreursMuscles : 
+        dataframe.loc[dataframe["Scan folder"]==erreur, 'PredictionVerification'] = "erreurMuscles"
+    
+    dfErreursAuto = dataframe[(dataframe['PredictionVerification'] == "erreurL3") | (dataframe['PredictionVerification'] == "erreurMuscles")]
+    dataframe = dataframe.drop(dfErreursAuto.index)
+        
+    if verbose>0: print("Les {} résultats sont séparés en :\n - {} résultats corrects,\n - {} résultats douteux concernant la localisation en L3,\n - {} résultats douteux concernant la segmentation muscles et graisses.".format(nbinitial,len(dataframe),len(ErreursL3),len(ErreursMuscles)))    
+    return dataframe, dfErreursAuto
+
+
+
+def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultasInterm,patharchives=None,erreurautorisee = 0.25, verbose=1):
+    """
+    Fusion des tableurs de résultats 
+    
+    Parameters
+    ----------
+        - dossier : string, chemin vers le dossier principal où se situent les fichierx excels de résultats d'AutoMATiCA
+        - csvpathtemp : string, chemin vers le .csv remplit lors de la localisation de L3
+        - resultatspath : string, chemin vers le .csv contenant les résultats finaux
+        - DIR_SORTIE : string, chemin vers le dossier où sont enregistrées les images finales
+        - DossierResultasInterm : string, chemin vers le dossier où sont enregistrées les DICOM en L3
+        - patharchives : string, optionnel, chemin vers le dossier d'archivage
+        - erreurautorisee : float <0 et <1, optionnel, indique le pourcentage d'erreur autorisée entre notre segmentation et celle d'automatica 
+        
+    Returns
+    -------
+        - newresult : dataframe, les reponses considérées comme correctes
+        - AllErrors : dataframe, les reponses considérées comme fausses
+    
+    Notes
+    -----
+    Sauvegarde automatiquement les .csv et .xlsx des résultats
+    
+    """
     pandas.set_option('mode.chained_assignment', None)
     
     #Chargement du csv (ODIASP)
     if os.path.isfile(csvpathtemp)==True:
         df = readCSV(csvpathtemp) 
         
-        #Effacement des résultats dans le csvTemporaire pour ne garder que la liste des examens déjà lus (evite qu'ils soient chargés à nouveau)
+        #Archivage du csv
         dfsave = readCSV(csvpathtemp) 
-        dfsave["Archive"] = "Yes"
-        #dfsave.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
+        #dfsave["Archive"] = "Yes" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         dfsave.to_csv(csvpathtemp, index=False)
         
-        
-        #Effacer les lignes déjà analysées
+        #Effacer les lignes déjà analysées et celles correspondant à des erreurs
         nonfait = df["Archive"].isna()
-        df = df[nonfait]
-
-        #Recuperation des colonnes utiles uniquement  
-        features_cols = ["PatientID", "StudyDate", "StudyID", "PatientName","Surface" ,"Certitude","PatientSex","SurfaceGraisseuse"]
-        df = df[features_cols]
+        chargmentarrete = df["Erreur"].isna()
+        df = df[nonfait & chargmentarrete]
         
         #Pour corriger les types
         for colonne in ["PatientID", "StudyDate", "StudyID"]:
@@ -2034,45 +1874,75 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurau
             df[colonne] = df[colonne].astype('int') 
         df["PatientName"] = df["PatientName"].astype('str') 
         df["Surface"] = df["Surface"].astype('float') 
-        df["SurfaceGraisseuse"] = df["SurfaceGraisseuse"].astype('float') 
-        df["Certitude"] = df["Certitude"].astype('float') 
+        df["SurfaceGraisseuse"] = df["SurfaceGraisseuse"].astype('float')
+        
+        #Effacer les erreurs d'apres laprediction du reseau
+        dfErreurs = df[(df['PredictionVerification'] == "erreurL3") | (df['PredictionVerification'] == "erreurMuscles")]
+        df = df.drop(dfErreurs.index)
+        features_cols1 = ["PatientID", "StudyDate", "StudyID", "PatientName","Surface","PatientSex","PatientSize","PredictionVerification"] #,"SurfaceGraisseuse"
+        dfErreurs = dfErreurs[features_cols1]
 
-        #Calcul de la graisse
-        #df['MGratioODIASP'] = df.apply(lambda row: row['Surface'] / (row['SurfaceGraisseuse']), axis=1)
-        
-        
+        #Recuperation des colonnes utiles uniquement  
+        features_cols2 = ["PatientID", "StudyDate", "StudyID", "PatientName","Surface","PatientSex","PatientSize"] #,"SurfaceGraisseuse"
+        df = df[features_cols2]
+
         nombreODIASP = df.shape[0]
     
     #Chargment des .xls (automatica)
     dfauto, listeExcels = import_all_XLS(dossier)
     if len(listeExcels)>0 :
-        print(len(listeExcels)) #DEBUG
         nombreAUTOMATICA = dfauto.shape[0]
+        dfauto,dfErreursAuto = RecuperationErreurs(dataframe = dfauto, 
+                                                   dossierExport = DIR_SORTIE,
+                                                   pathdexport = DossierResultasInterm,
+                                                   verbose = verbose)
     
+    
+        print(dfErreursAuto.head(30)) #DEBUG
+        #dfErreursAuto.drop_duplicates(keep="first",inplace=True) 
+        
     #Fusion des dataframes
     if os.path.isfile(csvpathtemp)==True and len(listeExcels)>0  and nombreODIASP >0:
-        print("actif")
-        #fusion des resultats
+        #fusion des resultats corrects
         df4 = pandas.concat([df,dfauto], ignore_index=False)
         df4 = df4.groupby(by=["PatientID","StudyDate"],observed=False).agg('mean')
-
+        
+        
         #Affichage des incertitudes sur ces resultats
-        df4['Erreurs'] = np.where((df4['Certitude']<1), 'Incertitude sur L3', 'ok') #<<<<<<<<<<<<<<<<<<<<<<< tweaker la valeur seuil
-        df4.loc[df4['MGratio'] >2, 'Erreurs'] = 'Incertitude sur les muscles' 
-        df4.loc[df4['Muscle CSA'] < ((1-erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude sur les muscles' 
-        df4.loc[df4['Muscle CSA'] > ((1+erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude sur les muscles' 
+        df4['Erreurs'] = "Ok" #np.where((df4['MGratio']>2), 'MGratio douteux', 'ok') 
+        df4.loc[df4['Muscle CSA'] < ((1-erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude car +{}%'.format(erreurautorisee*100) 
+        df4.loc[df4['Muscle CSA'] > ((1+erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude car -{}%'.format(erreurautorisee*100)
+        
+        #calcul du ratio SAT/VAT
+        df4['Ratio_VATsurSAT'] = df4['VAT CSA']/df4['SAT CSA']
+        df4['SommeGraisse'] = df4['VAT CSA'] + df4['SAT CSA'] + df4['IMAT CSA']
+        #df4['testDiffGraisse'] = df4['SurfaceGraisseuse'] - df4['SommeGraisse'] #DEBUG
         
         #On recupere les noms qui ont été perdus par la fonction groupby
         dfnames = df.copy()
         dfnames = dfnames[["PatientID","PatientSex", "StudyDate", "PatientName","PatientSize"]]
-        #dfnames.is_copy = None
         dfnames.drop_duplicates(keep="first",inplace=True) 
         dfnames.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
-        newresult = df4.join(dfnames, how='outer')
+        newresult = df4.join(dfnames, how='outer')      
+        
+        #fusion des resultats erronés                      
+        
+        AllErrors = pandas.merge(dfErreurs, dfErreursAuto, how='outer', on=["PatientID", "StudyDate"], left_index=True, right_index=True)
+        #AllErrors = pandas.concat([dfErreurs,dfErreursAuto], ignore_index=False)
+        AllErrors.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
+        #AllErrors = AllErrors.groupby(by=["PatientID","StudyDate"],observed=False).agg('mean')     
+                              
+        dfnamesErrors = dfErreurs.copy()
+        dfnamesErrors = dfnamesErrors[["PatientID","PatientSex", "StudyDate", "PatientName","PatientSize"]]
+        dfnamesErrors.drop_duplicates(keep="first",inplace=True) 
+        dfnamesErrors.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
+        print(dfnamesErrors.head(30)) #DEBUG
+        print(AllErrors.head(30)) #DEBUG
+        AllErrors = AllErrors.merge(dfnamesErrors, how='outer', left_index=True, right_index=True)
+        
 
+        #Archivage
         if patharchives!=None:
-            #Archivage
-            if verbose>0: print("Archivage...")
             destination = "Resultats_EXCEL"
             path = os.path.join(patharchives, destination)
 
@@ -2088,25 +1958,37 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,patharchives=None,erreurau
                 move(os.path.join(dossier,f), path)
             
         if verbose>0: print(nombreODIASP+nombreAUTOMATICA,"segmentations réalisées, ramenées à", newresult.shape[0], "patients uniques,")
-        if verbose>0: print("dont",newresult.Erreurs.value_counts()['ok'], "mesures semblent correctes")
-    
     
         #Ecriture du csv
         if os.path.isfile(resultatspath)==True:
             
             ancienresult = pandas.read_csv(resultatspath, delimiter=",")
             ancienresult.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
-            if showresults == True: print("Ajoutées aux", ancienresult.shape[0], "mesures pré-existantes.")
+            if verbose>0: print("Ajoutées aux", ancienresult.shape[0], "mesures pré-existantes.")
             newresult = pandas.concat([ancienresult,newresult], ignore_index=False)
         newresult.to_csv(resultatspath)
         
+        #Ecriture du .xlsx
+        if os.path.isfile(os.path.join(os.path.dirname(os.path.realpath(resultatspath)), "Resultats.xlsx"))==True:
+            book = openpyxl.load_workbook(os.path.join(os.path.dirname(os.path.realpath(resultatspath)), "Resultats.xlsx"))
+            ws = book['Errors']
+            data = ws.values
+            columns = next(data)[0:]
+            AnciennesErreurs = pandas.DataFrame(data, columns=columns)
+            AnciennesErreurs.set_index(["PatientID","StudyDate"], inplace = True, append = False, drop = True)
+            AllErrors = pandas.concat([AnciennesErreurs,AllErrors], ignore_index=False)
+        writer = pandas.ExcelWriter(os.path.join(os.path.dirname(os.path.realpath(resultatspath)), "Resultats.xlsx"))
+        newresult.to_excel(writer, sheet_name='main results')
+        AllErrors.to_excel(writer, sheet_name='Errors')
+        writer.save()
+
     else :
         print("Pas de nouveau fichier à charger.")
         if os.path.isfile(resultatspath)==True:
             newresult = pandas.read_csv(resultatspath, delimiter=",")
+    
         
-        
-    return newresult
+    return newresult, AllErrors
 
 
 

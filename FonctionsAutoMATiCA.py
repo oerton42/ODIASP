@@ -311,6 +311,9 @@ def segmentation_prediction(CT_filepaths, muscle_model, IMAT_model, VAT_model, S
     Patient_id = []
     Patient_age = []
     Patient_sex = []
+    
+    #essai perso
+    SeriesInstanceUID_list = []
       
     print("\nloading CT scans......n=%s" %(len(CT_filepaths)))
     for i, filepath in enumerate(CT_filepaths):
@@ -341,6 +344,13 @@ def segmentation_prediction(CT_filepaths, muscle_model, IMAT_model, VAT_model, S
             CT_date.append(img.StudyDate)
         except:
             CT_date.append('missing from CT scan')
+            
+        try:
+            SeriesInstanceUID_list.append(img.SeriesInstanceUID) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        except:
+            SeriesInstanceUID_list.append('missing from CT scan')    
+            
+            
         try:
             if not img.PatientID.strip():
                 Patient_id.append('no patient ID - index ' + str(i))
@@ -445,7 +455,7 @@ def segmentation_prediction(CT_filepaths, muscle_model, IMAT_model, VAT_model, S
     CT_fat_HU[CT_fat_HU > (abs(IMAT_SAT_range[1]) + abs(IMAT_SAT_range[0])+1)] = 0
     CT_fat_HU = CT_fat_HU/(abs(IMAT_SAT_range[1]) + abs(IMAT_SAT_range[0])+1)
 
-    return CT_HU.reshape(CT_HU.shape[:3]), CT_fat_HU.reshape(CT_HU.shape[:3]), CT_lean_HU.reshape(CT_HU.shape[:3]), CT_VAT_HU.reshape(CT_HU.shape[:3]), pred_muscle.reshape(CT_HU.shape[:3]), pred_IMAT.reshape(CT_HU.shape[:3]), pred_VAT.reshape(CT_HU.shape[:3]), pred_SAT.reshape(CT_HU.shape[:3]), CT_pixel_spacing, CT_image_dimensions, CT_voltage, CT_current, CT_date, CT_slice_thickness, Patient_id, Patient_age, Patient_sex, CT_filepaths, removed_scans
+    return CT_HU.reshape(CT_HU.shape[:3]), CT_fat_HU.reshape(CT_HU.shape[:3]), CT_lean_HU.reshape(CT_HU.shape[:3]), CT_VAT_HU.reshape(CT_HU.shape[:3]), pred_muscle.reshape(CT_HU.shape[:3]), pred_IMAT.reshape(CT_HU.shape[:3]), pred_VAT.reshape(CT_HU.shape[:3]), pred_SAT.reshape(CT_HU.shape[:3]), CT_pixel_spacing, CT_image_dimensions, CT_voltage, CT_current, CT_date, CT_slice_thickness, Patient_id, Patient_age, Patient_sex, CT_filepaths, removed_scans, SeriesInstanceUID_list
 
 
 def combine_segmentation_predictions(CT_fat_HU, CT_lean_HU, CT_VAT_HU, pred_VAT, pred_SAT, pred_IMAT, pred_muscle, threshold = 0.1):
@@ -848,7 +858,7 @@ def HU_analysis(combined_map, CT_HU):
         
     return muscle_HU, IMAT_HU, VAT_HU, SAT_HU
     
-def save_results_to_excel(Patient_id, Patient_age, Patient_sex, muscle_CSA, IMAT_CSA, VAT_CSA, SAT_CSA, muscle_HU, IMAT_HU, VAT_HU, SAT_HU, CT_pixel_spacing, CT_image_dimensions, CT_voltage, CT_current, CT_date, CT_slice_thickness, CT_filepaths, results_directory, removed_scans):
+def save_results_to_excel(Patient_id, Patient_age, Patient_sex, muscle_CSA, IMAT_CSA, VAT_CSA, SAT_CSA, muscle_HU, IMAT_HU, VAT_HU, SAT_HU, CT_pixel_spacing, CT_image_dimensions, CT_voltage, CT_current, CT_date, CT_slice_thickness, CT_filepaths, SeriesInstanceUID_list, results_directory, removed_scans):
     """
     Saves results to an excel file
     
@@ -933,7 +943,8 @@ def save_results_to_excel(Patient_id, Patient_age, Patient_sex, muscle_CSA, IMAT
                                       'CT current': CT_current,
                                       'CT date': CT_date,
                                       'CT slice thickness': CT_slice_thickness,
-                                      'Scan folder': CT_filepaths})
+                                      'Scan folder': CT_filepaths,
+                                     'Instance_UID': SeriesInstanceUID_list})
     
 
     date = datetime.datetime.now()
@@ -949,5 +960,5 @@ def save_results_to_excel(Patient_id, Patient_age, Patient_sex, muscle_CSA, IMAT
     
     
     writer.save()
-    
+    return results_dataframe
     

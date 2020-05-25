@@ -16,7 +16,7 @@ Ceci correspond au fichier de réglages
 #_____________________________________________
 
 #Indiquer le dossier où trouver les DICOM
-DossierImportDICOM   = r"J:\Covid" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+DossierImportDICOM   = r"J:\Exports" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
 
@@ -105,10 +105,12 @@ Il faut configurer la "strategy" >>>>>> dans les fichiers executeMe... .py <<<<<
 Voir https://www.tensorflow.org/api_docs/python/tf/distribute/Strategy
 
 Par défaut la strategy est configurée pour un ordinateur windows 10 en multigpu.
-Si vous ne savez pas comment configurer cette variable vous pouvez retirer l'argument strategy, le logiciel utilisera alors un seul gpu voire le CPU en l'absence de gpu (beaucoup plus long)
+Le multigpu permet de configurer les calculs des volumes sur une carte et le tensorflow sur la 2eme.
+Sans cette distinction cupy et tensofrflow rentrent en conflit.
+si vous avez deux cartes et voulez utiliser cupy, gardez Cupy = True, sinon vous pouvez le changer (par tous sauf True).
 
 """
-
+CUPY = True
 
 
 

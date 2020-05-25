@@ -28,16 +28,17 @@ Chargement de la strategy
 #gpus = tf.config.experimental.list_physical_devices('GPU')
 #tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=0)])
 
-physical_devices = tf.config.list_physical_devices('GPU') 
-try: 
-    # Disable first GPU 
-    tf.config.set_visible_devices(physical_devices[1:], 'GPU') 
-    logical_devices = tf.config.list_logical_devices('GPU') 
-    # Logical device was not created for first GPU 
-    assert len(logical_devices) == len(physical_devices) - 1 
-except: 
-    # Invalid device or cannot modify virtual devices once initialized. 
-    pass
+if CUPY == True:
+    physical_devices = tf.config.list_physical_devices('GPU') 
+    try: 
+        # Disable first GPU 
+        tf.config.set_visible_devices(physical_devices[1:], 'GPU') 
+        logical_devices = tf.config.list_logical_devices('GPU') 
+        # Logical device was not created for first GPU 
+        assert len(logical_devices) == len(physical_devices) - 1 
+    except: 
+        # Invalid device or cannot modify virtual devices once initialized. 
+        pass
 
 
 """

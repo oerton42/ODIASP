@@ -97,6 +97,12 @@ print(finsegmAUTO - finsegmodiasp, "secondes pour la segmentation par AutoMATiCA
 
 
 """
+Archivage des images utilisées
+"""
+PATH_archive  = ODIASP.DirVerification (PATH_archive,DossierDuProjet)
+ODIASP.archivage(PATHdEXPORT,PATH_archive,verbose=verbose)
+
+"""
 Enregistrement des résultats
 """
 df,AllErrors = ODIASP.FusionResultats(DossierDuProjet,
@@ -108,11 +114,7 @@ df,AllErrors = ODIASP.FusionResultats(DossierDuProjet,
                                       verbose=1)
 
 
-"""
-Archivage des images utilisées
-"""
-PATH_archive  = ODIASP.DirVerification (PATH_archive,DossierDuProjet)
-#ODIASP.archivage(PATHdEXPORT,PATH_archive,verbose=verbose)
+
 
 
 

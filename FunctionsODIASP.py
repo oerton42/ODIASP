@@ -123,7 +123,7 @@ def fast_scandir(dir):
 def TESTINGPRED(prediction,classes,mode="ProportionGlobale", nombredecoupes=1, numerocoupeinitial = 0, verbose=1):
     longueur = len(prediction)
     proportion =0
-    if numerocoupeinitial>longueur: #utilisé à des fins de DEBUGGING : a priori non possible.
+    if numerocoupeinitial>longueur: #utilisé à des fins de DEBUGGING uniquement : a priori non possible.
         print("error") 
         numerocoupeinitial=longueur
     if (nombredecoupes+numerocoupeinitial)>longueur:
@@ -173,7 +173,8 @@ def import_dicom_to_abdopelv(rootdir,
                              save=False, 
                              model = None,
                              verbose = 2,
-                             Compute_capacity = COMPUTE_CAPACITY
+                             Compute_capacity = COMPUTE_CAPACITY,
+                             CUPY = True
                              ):
     """
     Cette fonction charge un dossier contenant des fichiers DICOM. Elle peut s'arréter automatiquement si les métadonnées ou le nombre d'image ne correspondent pas.
@@ -461,7 +462,7 @@ def import_dicom_to_abdopelv(rootdir,
             
             del arraytopng
             
-        volume_pour_label     = np.asarray(volume_pour_label, dtype=np.float16) #DEBUG float32    
+        volume_pour_label     = np.asarray(volume_pour_label, dtype=np.float16)   
         volume_pour_label,a,b = normalize(volume_pour_label)
         volume_pour_label     = WL_scaled(WindowCenter,WindowWidth,volume_pour_label,a,b)
             
@@ -512,13 +513,11 @@ def import_dicom_to_abdopelv(rootdir,
                     raw_ds = raw_ds.replace('\t',"__")
                     raw_ds = raw_ds.replace(',',"__")
                     values.append(raw_ds)
-            
-            
+
         end = time.perf_counter()
         Timing = end-start
         
         dictMETADATAS = dict(zip(metadata, values))
-        
         dictODIASP = {'Name' : NOMFICHIER, "Duree" : Timing, "Erreur" : erreur,'OriginalSlices' : len(list_files), 'Path' : rootdir, "Archive" : None}
         dict3 = {**dictMETADATAS , **dictODIASP}
         df=pandas.read_csv(csv_path, delimiter=",")
@@ -526,10 +525,6 @@ def import_dicom_to_abdopelv(rootdir,
         modDfObj.to_csv(csv_path, index=False)
         
         return volume_numpy, perduSUP, perduBAS, facteur, None
-    
-    
-
-    
     
     
     
@@ -569,11 +564,8 @@ def import_dicom_to_abdopelv(rootdir,
                 perduBAS += tranchedelecture
                 if verbose>0:print("Supression de ",tranchedelecture," coupes finales dont la majorité est du membre inférieur.")
         if verbose>0 and perduBAS==0 :print("... Pas de coupes membres inférieurs majoritaires à la fin.")
-       
-        
+
         del volume_pour_label
-        
-        
         
         
         
@@ -586,9 +578,9 @@ def import_dicom_to_abdopelv(rootdir,
             dicom_file = pydicom.read_file(liste_fichiers[k])
             img_orig_dcm = (dicom_file.pixel_array)
             img_modif_dcm=(img_orig_dcm*slope) + intercept
-            img_modif_dcm= np.asarray(img_modif_dcm, dtype=np.float16) #DEBUG float32
+            img_modif_dcm= np.asarray(img_modif_dcm, dtype=np.float16) 
             volume_numpy[k,:,:]=img_modif_dcm #ecrit une ligne correspondant à l'image
-        volume_numpy = np.asarray(volume_numpy, dtype=np.float16) #DEBUG float32
+        volume_numpy = np.asarray(volume_numpy, dtype=np.float16)
         
         if len(liste_fichiers)>384 : #Cette partie de la fonction permet de s'affranchir des inégalités dépaisseurs de coupes.
             facteur = 384/(len(liste_fichiers))
@@ -598,12 +590,14 @@ def import_dicom_to_abdopelv(rootdir,
             
             #volume_numpy = zoom(volume_numpy, (facteur, 1, 1)) 
             #CUPY
-            cp.cuda.Device(0).use()
-            x_gpu_0 = cp.asarray(volume_numpy)
-            x_gpu_0 = MAGIC.zoom(x_gpu_0, (facteur, 1, 1))
-            volume_numpy = cp.asnumpy(x_gpu_0)
-            x_gpu_0 = None
-            
+            if CUPY == True:
+                cp.cuda.Device(0).use()
+                x_gpu_0 = cp.asarray(volume_numpy)
+                x_gpu_0 = MAGIC.zoom(x_gpu_0, (facteur, 1, 1))
+                volume_numpy = cp.asnumpy(x_gpu_0)
+                x_gpu_0 = None
+            else :
+                volume_numpy = zoom(volume_numpy, (facteur, 1, 1))
             
         else : 
             if verbose>0: print(len(liste_fichiers), " coupes ont étés chargées")
@@ -620,9 +614,7 @@ def import_dicom_to_abdopelv(rootdir,
             volume_numpy = np.asarray(volume_numpy, dtype=np.float16)
             affichage3D(volume_numpy, int(x_dim//2), axis=2)    
         
-        
 
-            
         #Mise a jour du csv
         if verbose>1:print("Mise à jour du fichier csv :", csv_path)
         values=[]
@@ -744,44 +736,8 @@ def WL_scaled (Global_Level,Global_Window,array,a,b):
 #___________________FONCTIONS POUR VALIDER LA SEGMENTATION__________________________________
 #___________________________________________________________________________________________
 
-def Reading_Hardrive (Name, Class=None, dirgeneral= r"C:\\Users\\alexa\\OneDrive\\Documents\\ODIASP"):
-    """
-    --- DEPRECATED---
-    Non utilisée dans la dernière version du réseau.
-    Utile uniquement pour la création du dataset.
-    """
-    if Class == "Images":
-        PATHduNUMPY = os.path.join(os.path.join(dirgeneral,"Images"),Name)
-        VOLUME = np.load(PATHduNUMPY)
-    elif Class == "Masks":
-        PATHduMASK = os.path.join(os.path.join(dirgeneral,"Masks"),Name)
-        VOLUME = np.load(PATHduMASK)
-    elif Class == None:
-        VOLUME = np.load(Name)
-    return VOLUME
 
-def Scaling(volume):
-    """
-    --- DEPRECATED---
-    Non utilisée dans la dernière version du réseau.
-    Utile uniquement pour la création du dataset.
-    
-    Utilisée dans Reading_and_scale
-    suppose un volume en 512,nb_de_coupes,512 : les images scanners sont en 512 par 512 mais le nombre de coupes est variable ++
-    permet de segmenter (crop) pour obtenir un volume de 128,384,384
-    """
-    correction =("ok",1,0)
-    volume = volume[192:320,:,96:-32]
-    hauteur = np.shape(volume)[1]
-    if hauteur<384:
-        ratio =384/hauteur
-        volume = zoom(volume, (1, ratio, 1))
-        correction = ("trop petit",hauteur, ratio)
-    if hauteur>384:
-        volume = volume[:,-384:,:]
-        delta = hauteur-384.
-        correction = ("trop grand", hauteur, delta)
-    return volume, correction
+
 
 def normalize (volume_array):
     """
@@ -815,7 +771,6 @@ def normalize (volume_array):
     return volume_array_scale,a,b
 
 
-
 def axial_to_sag (volume_array, sens=1):
     """
     Utilisée dans FindL3
@@ -830,7 +785,6 @@ def axial_to_sag (volume_array, sens=1):
     volume_array = np.rot90(volume_array,k=sens,axes=(0,1))
     volume_array = np.rot90(volume_array,k=sens,axes=(2,0))
     return volume_array
-
 
 
 def affichage3D(volume, k, axis=0):
@@ -855,6 +809,7 @@ def affichage3D(volume, k, axis=0):
     plt.show()
     return
     
+    
 def affichage2D(volume):
     """
     affiche un plan numpy 2D
@@ -869,6 +824,7 @@ def affichage2D(volume):
     plt.imshow(image1,cmap='gray')
     plt.show()
     return
+
 
 def AffichageMulti(volume, frequence, axis=0, FIGSIZE = 40):
     """
@@ -943,7 +899,6 @@ def NPY_to_DICOM (numpy=None,
     -----
     En l'état cette fonction n'est pas utilisée par FindL3 dans All-in-one : elle n'est pas nécessaire car nous récupérons directement le fichier dicom d'origine.
     Cette fonction pouvant s'avérer utile par ailleurs, nous la laissons donc en l'état.
-    
     """
     
     if mode=="name" :
@@ -1009,82 +964,81 @@ def NPY_to_DICOM (numpy=None,
                 NPY_to_DICOM (item, mode="name", csvpath=csvpath, dossier=dossier, dirgeneral=dirgeneral)
 
                 
-                
-
-
-
 
 #___________________________________________________________________________________________
 #___________________FONCTIONS POUR LA VERSION DATA AUGMENT DU RESEAU _______________________
 #___________________________________________________________________________________________
 
 
-
-
-
-def Norm_and_Scale_andCrop(VOLUME,downsample = 0.5):
+def Norm_and_Scale_andCrop(VOLUME,downsample = 0.5,CUPY=True):
     """
     prend un volume intact et commence à le traiter
     permet de diminuer la taille des fichiers
     """
-    cp.cuda.Device(0).use()
+    if CUPY== True:
+        cp.cuda.Device(0).use()
 
+
+        VOLUME = axial_to_sag(VOLUME)
+        #volume_array_gpu = cp.asarray(VOLUME)
+        #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(0,1))
+        #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(2,0))
+
+        hauteur = np.shape(VOLUME)[1]
+        correction =("ok",1,0)
+        if hauteur<384:
+            ratio =384/hauteur
+            volume_array_gpu = cp.asarray(VOLUME)
+            volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, ratio, 1))
+            VOLUME = cp.asnumpy(volume_array_gpu)
+            volume_array_gpu = None
+            correction = ("trop petit",hauteur, ratio)
+        if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
+            VOLUME = VOLUME[:,-384:,:]
+            delta = hauteur-384.
+            correction = ("trop grand", hauteur, delta)
+
+        VOLUME   = VOLUME[170:342,:,96:-32]
+        if downsample != 1 :
+            volume_array_gpu = cp.asarray(VOLUME)
+            volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, downsample, downsample))
+            VOLUME = cp.asnumpy(volume_array_gpu)
+            volume_array_gpu = None
+
+
+        VOLUMEnorm,a,b = normalize(VOLUME)
     
-    VOLUME = axial_to_sag(VOLUME)
-    #volume_array_gpu = cp.asarray(VOLUME)
-    #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(0,1))
-    #volume_array_gpu = cp.rot90(volume_array_gpu,1,axes=(2,0))
-    
-    hauteur = np.shape(VOLUME)[1]
-    correction =("ok",1,0)
-    if hauteur<384:
-        ratio =384/hauteur
-        volume_array_gpu = cp.asarray(VOLUME)
-        volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, ratio, 1))
-        VOLUME = cp.asnumpy(volume_array_gpu)
-        volume_array_gpu = None
-        correction = ("trop petit",hauteur, ratio)
-    if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
-        VOLUME = VOLUME[:,-384:,:]
-        delta = hauteur-384.
-        correction = ("trop grand", hauteur, delta)
-        
-    
-    
-    VOLUME   = VOLUME[170:342,:,96:-32]
-    if downsample != 1 :
-        volume_array_gpu = cp.asarray(VOLUME)
-        volume_array_gpu = MAGIC.zoom(volume_array_gpu, (1, downsample, downsample))
-        VOLUME = cp.asnumpy(volume_array_gpu)
-        volume_array_gpu = None
-        
-    
-    VOLUME,a,b = normalize(VOLUME)
-    
-    """
+
     #Version CPU
-    VOLUME = axial_to_sag(VOLUME)
-    hauteur = np.shape(VOLUME)[1]
-    correction =("ok",1,0)
-    if hauteur<384:
-        ratio =384/hauteur
-        VOLUME = zoom(VOLUME, (1, ratio, 1))
-        correction = ("trop petit",hauteur, ratio)
-    if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
-        VOLUME = VOLUME[:,-384:,:]
-        delta = hauteur-384.
-        correction = ("trop grand", hauteur, delta)
-        
-    VOLUME,a,b = normalize(VOLUME)
-    
-    VOLUME   = VOLUME[170:342,:,96:-32]
-    if downsample != 1 :
-        VOLUME = zoom(VOLUME, (1, downsample, downsample))
-    """
-    return VOLUME, correction,a,b
+    else:
+        VOLUME = axial_to_sag(VOLUME)
+        hauteur = np.shape(VOLUME)[1]
+        correction =("ok",1,0)
+        if hauteur<384:
+            ratio =384/hauteur
+            VOLUME = zoom(VOLUME, (1, ratio, 1))
+            correction = ("trop petit",hauteur, ratio)
+        if hauteur>384: #a noter que ceci n'est pas censé arriver, la fonction d'import limitant la taille a 384 !
+            VOLUME = VOLUME[:,-384:,:]
+            delta = hauteur-384.
+            correction = ("trop grand", hauteur, delta)
+
+        VOLUME,a,b = normalize(VOLUME)
+
+        VOLUME   = VOLUME[170:342,:,96:-32]
+        if downsample != 1 :
+            VOLUME = zoom(VOLUME, (1, downsample, downsample))
+
+    return VOLUMEnorm, correction,a,b, VOLUME
 
 
-
+def FindCoupeMediane(volume, verbose =0):
+    x=0
+    while np.sum(volume[:,x:,:]) > np.sum(volume[:,:x,:]):
+        x+=1
+    if verbose >0 : affichage2D(volume[:,x,:])
+    if verbose >0 : affichage3D(volume, int(np.shape(volume)[0]/2), axis=0)
+    return x
 
 #________________________________________________________________________________________
 
@@ -1101,7 +1055,8 @@ def Find_L3 (name,
              nombredecoupesperduesSUP = 0, nombredecoupesperduesBAS = 0,
              facteurAgrandissement = 1,
              verbose = 2,
-             Compute_capacity = COMPUTE_CAPACITY
+             Compute_capacity = COMPUTE_CAPACITY,
+             CUPY=True
             ):
     """
     Cette fonction prend un volume numpy et le rentre dans le réseau de neurones.
@@ -1155,10 +1110,13 @@ def Find_L3 (name,
 
     #Traitement du volume pour qu'il soit accepté par le reseau de neurones.
     if verbose>0:print("Adaptation du volume avant recherche de L3")
-    Model_import, correction,a,b = Norm_and_Scale_andCrop(NUMPY,downsample=downsample) #enregistre la 'correction' réalisée dans le scaling
+    Model_import, correction,a,b, backup = Norm_and_Scale_andCrop(NUMPY,downsample=downsample,CUPY=CUPY) #enregistre la 'correction' réalisée dans le scaling
+        
+    backup = backup + abs(np.min(backup))
+    backup = (backup/np.max(backup))*255
+    backup= backup.astype(np.uint8)
+    versionModel = Image.fromarray(backup[int(np.shape(backup)[0]/2),:,:])#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
     
-    #IL FAUT GERER LE CONTRASTE DU VOLUME
-    #Model_import = WL_scaled (level,window,Model_import,a,b)
     
     Model_import = Model_import[:,:,:,np.newaxis]
     if verbose>0:a=1 #au cas où verbose = 2 ce qui ne serait pas accepté par la Method predict
@@ -1166,25 +1124,55 @@ def Find_L3 (name,
     if verbose>0:print("Localisation de L3...")
     AUTO_BATCH = int(Compute_capacity*1.3)
     prediction = model.predict(Model_import, verbose =a, batch_size=AUTO_BATCH)
-    #prediction[prediction<(np.max(prediction)/2)]=0 #mauvaise idée en fait
+
     del Model_import
     
     #calcul du centre de gravité du volume donné au réseau pour obtenir le centre de L3 (et correction de sa valeur pour correspondre au volume numpy donné en entrée
-    center = scipy.ndimage.center_of_mass(prediction, labels=None, index=None)
+    center = scipy.ndimage.center_of_mass(prediction, labels=None, index=None)#normal
+    
+    #center_median = FindCoupeMediane(prediction) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #prediction[prediction<(np.max(prediction)/2)]=0 #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_bary_threshold = scipy.ndimage.center_of_mass(prediction, labels=None, index=None) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_median_threshold = FindCoupeMediane(prediction) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    
+    
     upsample=1/downsample
-    position = center[1]*upsample #position = center[1]*upsample
+    position = center[1]*upsample
+    #center_median *= upsample#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_bary_threshold = center_bary_threshold[1] * upsample#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_median_threshold *= upsample#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    
     if correction[0]=="trop petit": #lit la correction
         position=int(position/correction[2])
+        #center_median = int(center_median/correction[2]) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        #center_bary_threshold = int(center_bary_threshold/correction[2]) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        #center_median_threshold = int(center_median_threshold/correction[2])#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        
+        
+        
     elif correction[0]=="trop grand":
         position=int(position+correction[2])
+        #center_median = int(center_median+correction[2]) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        #center_bary_threshold = int(center_bary_threshold+correction[2]) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        #center_median_threshold = int(center_median_threshold+correction[2])#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        
+        
+        
+        
     else :
         position = int(position)
     if verbose>0:print("Axial position : "+str(position), "dans ce volume")
     positionreelle = int((position*(1/facteurAgrandissement)) +nombredecoupesperduesSUP)
+    #center_median = int((center_median*(1/facteurAgrandissement)) +nombredecoupesperduesSUP) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_bary_threshold = int((center_bary_threshold*(1/facteurAgrandissement)) +nombredecoupesperduesSUP) #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    #center_median_threshold = int((center_median_threshold*(1/facteurAgrandissement)) +nombredecoupesperduesSUP)#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    
+    
+    
     if verbose>0 and positionreelle != position : print("Axial position : ",positionreelle, " dans le volume initial")
-    Standard_deviation = np.std(prediction)
-    Certitude = (Standard_deviation*100)**6
-    if verbose>0:print("Estimation de la confiance : ", Certitude)
+    #Standard_deviation = np.std(prediction)
+    #Certitude = (Standard_deviation*100)**6
+    #if verbose>0:print("Estimation de la confiance : ", Certitude)
     
     NUMPY = np.asarray(NUMPY, dtype=np.float16)
     image = NUMPY[position,:,:] #image axiale centrée sur le baricentre
@@ -1203,7 +1191,7 @@ def Find_L3 (name,
     mask_a_afficher =np.zeros(np.shape(sagittal_wl))
     mask_a_afficher[:,96:-32] = sagittalPRED
     
-    mask_a_save = mask_a_afficher/np.max(mask_a_afficher)#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    mask_a_save = mask_a_afficher/np.max(mask_a_afficher)
     
     #Gestion des problèmes de nom de fichier vs nom de dossier
     if str(name)[-4:] == r".npy":
@@ -1221,6 +1209,7 @@ def Find_L3 (name,
         arraytopng= arraytopng.astype(np.uint8)
         im = Image.fromarray(arraytopng)
         im.save(os.path.join(savepng,name__)+r"_axial.png")
+        versionModel.save(os.path.join(savepng,name__)+r"VersionScaleModel.png") #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         
         #saving the sagittal image
         sagtopng,_,_,_ = Norm0_1(sagittal_wl+mask_a_save/6)#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -1247,9 +1236,12 @@ def Find_L3 (name,
         df=pandas.read_csv(csv_path, delimiter=",")
         df.set_index("Name", inplace=True)
         df.at[nameNPY,"L3Position"] = position
-        df.at[nameNPY,"Standard_deviation"] = Standard_deviation
-        df.at[nameNPY,"Certitude"] = Certitude
+        #df.at[nameNPY,"Standard_deviation"] = Standard_deviation
+        #df.at[nameNPY,"Certitude"] = Certitude
         df.at[nameNPY,"L3Original"] = positionreelle
+        #df.at[nameNPY,"center_median"] = center_median
+        #df.at[nameNPY,"center_bary_threshold"] = center_bary_threshold
+        #df.at[nameNPY,"center_median_threshold"] = center_median_threshold
         df.at[nameNPY,"DureeL3"] = Timing
         df.to_csv(csv_path)
 
@@ -1267,7 +1259,8 @@ def All_in_One(dossierDICOM,
                VERBOSE = 2,
                WINDOW_CENTER = 40,
                WINDOW_WIDTH = 400,
-               DossierDeTravail = None
+               DossierDeTravail = None,
+               CUPY = True
               ):
     """
     Charge les examens depuis un dossier, trouve les images correspondant au scan abdopelvien puis segmente ce volume pour trouver L3.
@@ -1319,7 +1312,8 @@ def All_in_One(dossierDICOM,
                                                                                   csv_path = csv_path,
                                                                                   save= False, 
                                                                                   model = MODEL_niveau_de_coupe,
-                                                                                  verbose = VERBOSE)
+                                                                                  verbose = VERBOSE,
+                                                                                  CUPY=CUPY)
         
         finImport_time = time.clock() #TIME
         print(finImport_time - start_time, "secondes pour l'import")#TIME
@@ -1348,7 +1342,8 @@ def All_in_One(dossierDICOM,
                                                  savedcm=False,
                                                  nombredecoupesperduesSUP = perduSUP,nombredecoupesperduesBAS = perduBAS,
                                                  facteurAgrandissement = facteur,
-                                                 verbose = VERBOSE)
+                                                 verbose = VERBOSE,
+                                                 CUPY=CUPY)
             
             
             finL3 = time.clock() #TIME
@@ -1815,10 +1810,15 @@ def RecuperationErreurs(dataframe, dossierExport, pathdexport, verbose = 1):
             name=os.path.join(pathdexport,str(name)+r"_FichierOrigine.dcm")
             ErreursMuscles.append(name)
     
+    dataframe["PredictionVerification"] = "Ok"
+    
     for erreur in ErreursL3 : 
         dataframe.loc[dataframe["Scan folder"]==erreur, 'PredictionVerification'] = "erreurL3"
     for erreur in ErreursMuscles : 
         dataframe.loc[dataframe["Scan folder"]==erreur, 'PredictionVerification'] = "erreurMuscles"
+    
+    #if len(ErreursL3) + len(ErreursMuscles) == 0:
+    #    dataframe["PredictionVerification"] = "Ok"
     
     dfErreursAuto = dataframe[(dataframe['PredictionVerification'] == "erreurL3") | (dataframe['PredictionVerification'] == "erreurMuscles")]
     dataframe = dataframe.drop(dfErreursAuto.index)
@@ -1860,7 +1860,7 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultas
         
         #Archivage du csv
         dfsave = readCSV(csvpathtemp) 
-        #dfsave["Archive"] = "Yes" #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        dfsave["Archive"] = "Yes"
         dfsave.to_csv(csvpathtemp, index=False)
         
         #Effacer les lignes déjà analysées et celles correspondant à des erreurs
@@ -1896,10 +1896,6 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultas
                                                    dossierExport = DIR_SORTIE,
                                                    pathdexport = DossierResultasInterm,
                                                    verbose = verbose)
-    
-    
-        print(dfErreursAuto.head(30)) #DEBUG
-        #dfErreursAuto.drop_duplicates(keep="first",inplace=True) 
         
     #Fusion des dataframes
     if os.path.isfile(csvpathtemp)==True and len(listeExcels)>0  and nombreODIASP >0:
@@ -1907,16 +1903,14 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultas
         df4 = pandas.concat([df,dfauto], ignore_index=False)
         df4 = df4.groupby(by=["PatientID","StudyDate"],observed=False).agg('mean')
         
-        
         #Affichage des incertitudes sur ces resultats
-        df4['Erreurs'] = "Ok" #np.where((df4['MGratio']>2), 'MGratio douteux', 'ok') 
+        df4['Erreurs'] = "Ok"
         df4.loc[df4['Muscle CSA'] < ((1-erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude car +{}%'.format(erreurautorisee*100) 
         df4.loc[df4['Muscle CSA'] > ((1+erreurautorisee)*df4['Surface']), 'Erreurs'] = 'Incertitude car -{}%'.format(erreurautorisee*100)
         
         #calcul du ratio SAT/VAT
         df4['Ratio_VATsurSAT'] = df4['VAT CSA']/df4['SAT CSA']
         df4['SommeGraisse'] = df4['VAT CSA'] + df4['SAT CSA'] + df4['IMAT CSA']
-        #df4['testDiffGraisse'] = df4['SurfaceGraisseuse'] - df4['SommeGraisse'] #DEBUG
         
         #On recupere les noms qui ont été perdus par la fonction groupby
         dfnames = df.copy()
@@ -1928,16 +1922,13 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultas
         #fusion des resultats erronés                      
         
         AllErrors = pandas.merge(dfErreurs, dfErreursAuto, how='outer', on=["PatientID", "StudyDate"], left_index=True, right_index=True)
-        #AllErrors = pandas.concat([dfErreurs,dfErreursAuto], ignore_index=False)
         AllErrors.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
-        #AllErrors = AllErrors.groupby(by=["PatientID","StudyDate"],observed=False).agg('mean')     
                               
         dfnamesErrors = dfErreurs.copy()
         dfnamesErrors = dfnamesErrors[["PatientID","PatientSex", "StudyDate", "PatientName","PatientSize"]]
         dfnamesErrors.drop_duplicates(keep="first",inplace=True) 
         dfnamesErrors.set_index(["PatientID","StudyDate"], inplace = True,append = False, drop = True)
-        print(dfnamesErrors.head(30)) #DEBUG
-        print(AllErrors.head(30)) #DEBUG
+
         AllErrors = AllErrors.merge(dfnamesErrors, how='outer', left_index=True, right_index=True)
         
 
@@ -1979,7 +1970,8 @@ def FusionResultats(dossier,csvpathtemp,resultatspath,DIR_SORTIE,DossierResultas
             AllErrors = pandas.concat([AnciennesErreurs,AllErrors], ignore_index=False)
         writer = pandas.ExcelWriter(os.path.join(os.path.dirname(os.path.realpath(resultatspath)), "Resultats.xlsx"))
         newresult.to_excel(writer, sheet_name='main results')
-        AllErrors.to_excel(writer, sheet_name='Errors')
+        if AllErrors.shape[0] > 0 :
+            AllErrors.to_excel(writer, sheet_name='Errors')
         writer.save()
 
     else :
